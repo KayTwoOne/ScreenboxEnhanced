@@ -71,6 +71,7 @@ public static class ServiceHelpers
         services.AddSingleton<IDatabaseService, DatabaseService>();
         services.AddSingleton<IPlayerService, PlayerService>();
         services.AddSingleton<IFilesService, FilesService>();
+        services.AddSingleton<IArtworkService, ArtworkService>();
         services.AddSingleton<ILibraryService, LibraryService>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IWindowService, WindowService>();
