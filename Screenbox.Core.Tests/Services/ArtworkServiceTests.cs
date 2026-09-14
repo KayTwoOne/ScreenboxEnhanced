@@ -34,25 +34,25 @@ public sealed class ArtworkServiceTests
     [Test]
     public async Task ShouldSkipConventionCopy_SkipsOnlyWhenDestinationExistsAndMetadataAlreadyRecordsIt()
     {
-        const string expectedFileName = "g_deadbeef.jpg";
+        const string conventionExtension = ".jpg";
         FolderMetadataDto recorded = new()
         {
             Path = "C:\\Library\\Show",
             PosterSource = PosterSource.Convention,
-            PosterFile = expectedFileName
+            PosterFile = "g_deadbeef_8f2c1a.jpg"
         };
 
         // Already copied and recorded: skip the redundant copy and database write. This is the
         // hot path exercised on every folder navigation once a convention poster is established.
-        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, expectedFileName, destinationFileExists: true))
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, conventionExtension, recordedFileExists: true))
             .IsTrue();
 
         // Metadata claims the file exists but it is missing from local storage: must (re)copy.
-        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, expectedFileName, destinationFileExists: false))
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, conventionExtension, recordedFileExists: false))
             .IsFalse();
 
         // No metadata at all: first time seeing this folder, must copy.
-        await Assert.That(ArtworkService.ShouldSkipConventionCopy(null, expectedFileName, destinationFileExists: true))
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(null, conventionExtension, recordedFileExists: true))
             .IsFalse();
 
         // Metadata records a different source (e.g. an AutoFrame fallback happens to reuse the
@@ -61,20 +61,54 @@ public sealed class ArtworkServiceTests
         {
             Path = recorded.Path,
             PosterSource = PosterSource.AutoFrame,
-            PosterFile = expectedFileName
+            PosterFile = recorded.PosterFile
         };
-        await Assert.That(ArtworkService.ShouldSkipConventionCopy(differentSource, expectedFileName, destinationFileExists: true))
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(differentSource, conventionExtension, recordedFileExists: true))
             .IsFalse();
 
-        // Metadata records a different file name (e.g. the convention file's extension changed
-        // from .png to .jpg): must copy the new one rather than keeping the stale reference.
+        // The convention file's extension changed from .png to .jpg: must copy the new one rather
+        // than keeping the stale reference.
         FolderMetadataDto staleFileName = new()
         {
             Path = recorded.Path,
             PosterSource = PosterSource.Convention,
-            PosterFile = "g_00000000.png"
+            PosterFile = "g_00000000_4b1e.png"
         };
-        await Assert.That(ArtworkService.ShouldSkipConventionCopy(staleFileName, expectedFileName, destinationFileExists: true))
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(staleFileName, conventionExtension, recordedFileExists: true))
+            .IsFalse();
+    }
+
+    [Test]
+    public async Task IsOrphanedFolderPath_EvictsOnlyFoldersThatGenuinelyDisappeared()
+    {
+        string[] roots = [@"D:\Media\Anime", @"E:\Archive"];
+        // E: is an unplugged drive: its root reads as missing, and so does everything beneath it.
+        HashSet<string> existing = new(StringComparer.OrdinalIgnoreCase)
+        {
+            @"D:\Media\Anime",
+            @"D:\Media\Anime\Frieren"
+        };
+        bool DirectoryExists(string path) => existing.Contains(path);
+
+        // Gone from a library root that is readable right now: safe to evict.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\Anime\Deleted Show", roots, DirectoryExists))
+            .IsTrue();
+
+        // Still on disk: keep the row, including a manual poster.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\Anime\Frieren", roots, DirectoryExists))
+            .IsFalse();
+
+        // Under a root that is itself unreachable (offline drive or network share): everything
+        // there looks missing, so evicting would destroy data that is merely not plugged in.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"E:\Archive\Old Show", roots, DirectoryExists))
+            .IsFalse();
+
+        // Outside every scanned root: this scan says nothing about it, so leave it alone.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"C:\Elsewhere\Show", roots, DirectoryExists))
+            .IsFalse();
+
+        // A sibling whose name merely starts with a root's name is not inside that root.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\AnimeMovies\Show", roots, DirectoryExists))
             .IsFalse();
     }
 }

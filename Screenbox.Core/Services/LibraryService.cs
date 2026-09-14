@@ -27,15 +27,18 @@ public sealed class LibraryService : ILibraryService
     private readonly ISettingsService _settingsService;
     private readonly IFilesService _filesService;
     private readonly IDatabaseService _databaseService;
+    private readonly IArtworkService _artworkService;
     private readonly MediaViewModelFactory _mediaFactory;
     private readonly ILogger<LibraryService> _logger;
 
     public LibraryService(ISettingsService settingsService, IFilesService filesService,
-        IDatabaseService databaseService, MediaViewModelFactory mediaFactory, ILogger<LibraryService> logger)
+        IDatabaseService databaseService, IArtworkService artworkService,
+        MediaViewModelFactory mediaFactory, ILogger<LibraryService> logger)
     {
         _settingsService = settingsService;
         _filesService = filesService;
         _databaseService = databaseService;
+        _artworkService = artworkService;
         _mediaFactory = mediaFactory;
         _logger = logger;
     }
@@ -481,6 +484,11 @@ public sealed class LibraryService : ILibraryService
         try
         {
             await _databaseService.SaveVideoCacheAsync(folderPaths, snapshot);
+
+            // The library has just been walked, so this is the one point where folders that are
+            // gone can be told apart from folders that are merely not on screen. Folder metadata is
+            // keyed on absolute path and would otherwise accumulate rows and artwork files forever.
+            await _artworkService.PruneOrphanedArtworkAsync(folderPaths);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {

@@ -106,4 +106,40 @@ public sealed class ArtworkResolverTests
 
         await Assert.That(decision.Source).IsEqualTo(PosterSource.Convention);
     }
+
+    [Test]
+    public async Task ResolveFromMetadata_SettlesPinnedChoicesWithoutInspectingTheFolder()
+    {
+        // Callers rely on this to skip the convention-file scan and the recursive video search,
+        // which otherwise run on every container realization.
+        var manual = new FolderMetadataDto
+        {
+            Path = @"D:\x", PosterFile = "manual.jpg", PosterSource = PosterSource.Manual
+        };
+        var scraped = new FolderMetadataDto
+        {
+            Path = @"D:\x", PosterFile = "scraped.jpg", PosterSource = PosterSource.Scraped
+        };
+
+        await Assert.That(ArtworkResolver.ResolveFromMetadata(manual)?.Source).IsEqualTo(PosterSource.Manual);
+        await Assert.That(ArtworkResolver.ResolveFromMetadata(scraped)?.Source).IsEqualTo(PosterSource.Scraped);
+    }
+
+    [Test]
+    public async Task ResolveFromMetadata_DefersWhenTheFolderStillHasToBeInspected()
+    {
+        var cachedFrame = new FolderMetadataDto
+        {
+            Path = @"D:\x", PosterFile = "frame.jpg", PosterSource = PosterSource.AutoFrame
+        };
+
+        // A convention file inside the folder outranks a cached frame, so these cases cannot be
+        // decided from the row alone.
+        await Assert.That(ArtworkResolver.ResolveFromMetadata(cachedFrame)).IsNull();
+        await Assert.That(ArtworkResolver.ResolveFromMetadata(null)).IsNull();
+        await Assert.That(ArtworkResolver.ResolveFromMetadata(new FolderMetadataDto
+        {
+            Path = @"D:\x", PosterSource = PosterSource.Manual
+        })).IsNull().Because("A manual source with no stored file name decides nothing.");
+    }
 }

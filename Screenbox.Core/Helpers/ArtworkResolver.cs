@@ -26,16 +26,9 @@ public static class ArtworkResolver
     /// <param name="hasCachedFrame">Whether the stored poster file is present on disk.</param>
     public static ArtworkDecision Resolve(FolderMetadataDto? metadata, bool hasConventionFile, bool hasCachedFrame)
     {
-        // A manual choice always wins and is never silently replaced, even when the
-        // file is temporarily missing. Losing it would discard deliberate user work.
-        if (metadata is { PosterSource: PosterSource.Manual, PosterFile: { Length: > 0 } manual })
+        if (ResolveFromMetadata(metadata) is { } pinned)
         {
-            return new ArtworkDecision(PosterSource.Manual, manual, NeedsGeneration: false);
-        }
-
-        if (metadata is { PosterSource: PosterSource.Scraped, PosterFile: { Length: > 0 } scraped })
-        {
-            return new ArtworkDecision(PosterSource.Scraped, scraped, NeedsGeneration: false);
+            return pinned;
         }
 
         if (hasConventionFile)
@@ -49,5 +42,28 @@ public static class ArtworkResolver
         }
 
         return new ArtworkDecision(PosterSource.None, FileName: null, NeedsGeneration: true);
+    }
+
+    /// <summary>
+    /// Resolves the decision that stored metadata settles on its own, or null when the folder's
+    /// contents still have to be inspected. Callers use this to skip the convention-file scan and
+    /// the recursive video search entirely for a folder whose artwork is already pinned.
+    /// </summary>
+    /// <param name="metadata">Stored metadata for the folder, or null when it has none.</param>
+    public static ArtworkDecision? ResolveFromMetadata(FolderMetadataDto? metadata)
+    {
+        // A manual choice always wins and is never silently replaced, even when the
+        // file is temporarily missing. Losing it would discard deliberate user work.
+        if (metadata is { PosterSource: PosterSource.Manual, PosterFile: { Length: > 0 } manual })
+        {
+            return new ArtworkDecision(PosterSource.Manual, manual, NeedsGeneration: false);
+        }
+
+        if (metadata is { PosterSource: PosterSource.Scraped, PosterFile: { Length: > 0 } scraped })
+        {
+            return new ArtworkDecision(PosterSource.Scraped, scraped, NeedsGeneration: false);
+        }
+
+        return null;
     }
 }

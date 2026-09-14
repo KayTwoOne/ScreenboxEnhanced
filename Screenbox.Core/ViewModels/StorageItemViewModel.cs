@@ -7,6 +7,7 @@ using Screenbox.Core.Factories;
 using Screenbox.Core.Models;
 using Screenbox.Core.Services;
 using Windows.Storage;
+using Windows.UI.Xaml;
 using Windows.UI.Xaml.Media.Imaging;
 
 namespace Screenbox.Core.ViewModels;
@@ -40,6 +41,7 @@ public sealed partial class StorageItemViewModel : ObservableObject
     private readonly ILogger<StorageItemViewModel> _logger;
     private readonly IArtworkService _artworkService;
     private readonly IDatabaseService _databaseService;
+    private bool _folderArtworkLoaded;
 
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]
     public StorageItemViewModel(IFilesService filesService,
@@ -125,9 +127,13 @@ public sealed partial class StorageItemViewModel : ObservableObject
     /// <see cref="MediaViewModel.LoadThumbnailAsync"/>). For folders, this loads the custom
     /// title and poster artwork.
     /// </summary>
+    /// <param name="force">
+    /// Reload even when this item's folder artwork was already resolved. Used after the user edits
+    /// the folder, which is the only time the stored values can have changed under us.
+    /// </param>
     [DynamicWindowsRuntimeCast(typeof(StorageFolder))]
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]
-    public async Task LoadArtworkAsync()
+    public async Task LoadArtworkAsync(bool force = false)
     {
         if (StorageItem is StorageFile)
         {
@@ -137,20 +143,49 @@ public sealed partial class StorageItemViewModel : ObservableObject
 
         if (StorageItem is not StorageFolder folder || string.IsNullOrEmpty(folder.Path)) return;
 
+        // Container realization fires on every scroll-back, and resolving folder artwork costs a
+        // database read plus filesystem scans. Same early-out as MediaViewModel.LoadThumbnailAsync,
+        // widened to a flag so a folder that resolved to no artwork is not re-resolved either.
+        if (_folderArtworkLoaded && !force) return;
+
         try
         {
             FolderMetadataDto? metadata = await _databaseService.LoadFolderMetadataAsync(folder.Path);
             DisplayName = metadata?.CustomTitle is { Length: > 0 } title ? title : Name;
 
-            string? posterFile = await _artworkService.GetPosterFileNameAsync(folder);
-            if (posterFile is not { Length: > 0 }) return;
+            // Hand over the row just read; the service would otherwise read it again.
+            string? posterFile = await _artworkService.GetPosterFileNameAsync(folder, metadata);
+            _folderArtworkLoaded = true;
+            if (posterFile is not { Length: > 0 })
+            {
+                Thumbnail = null;
+                return;
+            }
 
             var uri = new Uri($"ms-appdata:///local/{ArtworkService.ArtworkFolderName}/{posterFile}");
-            Thumbnail = new BitmapImage(uri) { DecodePixelWidth = 400 };
+            var image = new BitmapImage(uri) { DecodePixelWidth = 400 };
+
+            // A poster file can still go missing or turn unreadable between the check and the
+            // decode. Dropping the failed image restores the folder glyph rather than leaving a
+            // blank tile; the stored choice in the database is untouched either way.
+            image.ImageFailed += OnThumbnailFailed;
+            Thumbnail = image;
         }
         catch (Exception e)
         {
             _logger.LogError(e, "Failed to load folder artwork for '{Path}'.", Path);
         }
+    }
+
+    [DynamicWindowsRuntimeCast(typeof(BitmapImage))]
+    private void OnThumbnailFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        if (sender is BitmapImage image)
+        {
+            image.ImageFailed -= OnThumbnailFailed;
+            if (ReferenceEquals(Thumbnail, image)) Thumbnail = null;
+        }
+
+        _logger.LogWarning("Folder artwork failed to load for '{Path}': {Message}.", Path, e.ErrorMessage);
     }
 }

@@ -108,6 +108,8 @@ public sealed partial class FolderViewPage : Page
         if (result is null) return;
 
         await ViewModel.ApplyFolderEditAsync(folder, result.Title, result.Poster);
-        await item.LoadArtworkAsync();
+
+        // The stored title and poster just changed, so bypass the per-item early-out.
+        await item.LoadArtworkAsync(force: true);
     }
 }
