@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -76,6 +77,13 @@ public sealed partial class DatabaseService
         }
     }
 
+    /// <summary>
+    /// Last-resort recovery for a database file that cannot be opened or migrated at all. This
+    /// deletes the file, which destroys durable user-authored data in <c>folder_metadata</c> and
+    /// <c>playlists</c> along with the rebuildable cache tables. Per-table migration
+    /// (see <see cref="EnsureFolderMetadataTable"/>) is what keeps that data safe from routine
+    /// schema changes; nothing protects it from genuine file corruption.
+    /// </summary>
     private void RecreateDatabaseFile(string dbPath, string connectionString)
     {
         _connectionString = null;
@@ -93,7 +101,7 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreatePlaybackProgressSql);
         ExecuteNonQuery(connection, CreatePlaylistsSql);
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
-        ExecuteNonQuery(connection, CreateFolderMetadataSql);
+        ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
     }
@@ -152,28 +160,92 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
     }
 
-    // `folder_metadata` is durable, user-authored data (custom titles, poster choices).
-    // This mirrors EnsurePlaylistsTable deliberately: it must never be registered with
-    // EnsureReplaceableTable, which drops the table outright on column drift.
+    // `folder_metadata` holds durable, user-authored data: custom folder titles and manual poster
+    // choices that nothing else in the app can reconstruct. It is therefore the one table here that
+    // is NEVER dropped on column drift. Missing columns are added with ALTER TABLE, and a shape that
+    // cannot be reached additively is rebuilt by copying the existing rows into the new table.
+    // Registering it with EnsureReplaceableTable - or copying the drop-and-recreate shape of
+    // EnsurePlaylistsTable and EnsurePlaylistItemsTable, which do destroy their rows on drift -
+    // would wipe every custom title and poster choice the first time a column is added.
     private static void EnsureFolderMetadataTable(SqliteConnection connection)
     {
-        HashSet<string> actualColumns = ReadTableColumns(connection, "folder_metadata");
-        string[] expectedColumns =
-            ["path", "custom_title", "poster_file", "poster_source", "provider_pin", "sort_order"];
-
+        HashSet<string> actualColumns = ReadTableColumns(connection, FolderMetadataTableName);
         if (actualColumns.Count is 0)
         {
-            ExecuteNonQuery(connection, CreateFolderMetadataSql);
+            ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
             return;
         }
 
+        string[] expectedColumns = FolderMetadataColumns.Select(column => column.Name).ToArray();
         if (!HasSchemaDrift(actualColumns, expectedColumns))
         {
             return;
         }
 
-        ExecuteNonQuery(connection, "DROP TABLE folder_metadata;");
-        ExecuteNonQuery(connection, CreateFolderMetadataSql);
+        // Columns the stored database has never heard of can simply be appended in place, which
+        // leaves every existing row untouched. SQLite cannot ADD COLUMN for a PRIMARY KEY or UNIQUE
+        // column, and it cannot remove a column this way, so those cases fall through to the rebuild.
+        var expectedNames = new HashSet<string>(expectedColumns, StringComparer.OrdinalIgnoreCase);
+        bool hasUnknownColumns = actualColumns.Any(column => !expectedNames.Contains(column));
+        (string Name, string Definition)[] missingColumns =
+            FolderMetadataColumns.Where(column => !actualColumns.Contains(column.Name)).ToArray();
+
+        if (!hasUnknownColumns && missingColumns.All(column => CanAddColumnInPlace(column.Definition)))
+        {
+            foreach ((string name, string definition) in missingColumns)
+            {
+                ExecuteNonQuery(connection, $"ALTER TABLE {FolderMetadataTableName} ADD COLUMN {name} {definition};");
+            }
+
+            return;
+        }
+
+        RebuildFolderMetadataTable(connection, actualColumns);
+    }
+
+    /// <summary>
+    /// Copies every stored row into a table with the current shape, for drift that
+    /// <c>ALTER TABLE ... ADD COLUMN</c> cannot express (a removed or retyped column). Columns that
+    /// exist in both shapes carry their values across; anything else falls back to its default.
+    /// </summary>
+    private static void RebuildFolderMetadataTable(SqliteConnection connection, HashSet<string> actualColumns)
+    {
+        const string stagingTableName = "folder_metadata_migrating";
+        ExecuteNonQuery(connection, $"DROP TABLE IF EXISTS {stagingTableName};");
+        ExecuteNonQuery(connection, BuildCreateTableSql(stagingTableName, FolderMetadataColumns));
+
+        string[] sharedColumns = FolderMetadataColumns
+            .Where(column => actualColumns.Contains(column.Name))
+            .Select(column => column.Name)
+            .ToArray();
+
+        if (sharedColumns.Length > 0)
+        {
+            string columnList = string.Join(", ", sharedColumns);
+            ExecuteNonQuery(connection,
+                $"INSERT OR REPLACE INTO {stagingTableName} ({columnList}) SELECT {columnList} FROM {FolderMetadataTableName};");
+        }
+
+        ExecuteNonQuery(connection, $"DROP TABLE {FolderMetadataTableName};");
+        ExecuteNonQuery(connection, $"ALTER TABLE {stagingTableName} RENAME TO {FolderMetadataTableName};");
+    }
+
+    /// <summary>
+    /// True when SQLite accepts the column definition in an <c>ALTER TABLE ... ADD COLUMN</c>
+    /// statement. Key and unique constraints, and NOT NULL without a default, must be rebuilt.
+    /// </summary>
+    private static bool CanAddColumnInPlace(string definition)
+    {
+        if (definition.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase)) return false;
+        if (definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase)) return false;
+        return !definition.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase)
+               || definition.Contains("DEFAULT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildCreateTableSql(string tableName, (string Name, string Definition)[] columns)
+    {
+        string body = string.Join(",\n    ", columns.Select(column => $"{column.Name} {column.Definition}"));
+        return $"CREATE TABLE IF NOT EXISTS {tableName} (\n    {body}\n);";
     }
 
     private async Task<bool> TryImportLegacyPlaylistsAsync(SqliteConnection connection)
@@ -410,14 +482,20 @@ public sealed partial class DatabaseService
         );
         """;
 
-    private const string CreateFolderMetadataSql = """
-        CREATE TABLE IF NOT EXISTS folder_metadata (
-            path          TEXT PRIMARY KEY,
-            custom_title  TEXT,
-            poster_file   TEXT,
-            poster_source INTEGER NOT NULL DEFAULT 0,
-            provider_pin  TEXT,
-            sort_order    INTEGER
-        );
-        """;
+    private const string FolderMetadataTableName = "folder_metadata";
+
+    /// <summary>
+    /// The single source of truth for the <c>folder_metadata</c> shape. The same definitions build
+    /// the CREATE TABLE statement for a new database and the ALTER TABLE statement that adds a
+    /// column to an existing one, so a column added here migrates without dropping any user data.
+    /// </summary>
+    private static readonly (string Name, string Definition)[] FolderMetadataColumns =
+    [
+        ("path", "TEXT PRIMARY KEY"),
+        ("custom_title", "TEXT"),
+        ("poster_file", "TEXT"),
+        ("poster_source", "INTEGER NOT NULL DEFAULT 0"),
+        ("provider_pin", "TEXT"),
+        ("sort_order", "INTEGER")
+    ];
 }
