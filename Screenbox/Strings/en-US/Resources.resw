@@ -1163,5 +1163,17 @@
     <value>Aspect ratio: {0}</value>
     <comment>#Format[String ratio]</comment>
   </data>
+  <data name="EditFolder" xml:space="preserve">
+    <value>Edit folder</value>
+  </data>
+  <data name="EditFolderTitlePlaceholder" xml:space="preserve">
+    <value>Display title</value>
+  </data>
+  <data name="ChooseImage" xml:space="preserve">
+    <value>Choose image</value>
+  </data>
+  <data name="Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
 </root>
 

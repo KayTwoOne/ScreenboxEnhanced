@@ -10,6 +10,7 @@ using CommunityToolkit.WinUI;
 using Screenbox.Core.Factories;
 using Screenbox.Core.Helpers;
 using Screenbox.Core.Messages;
+using Screenbox.Core.Models;
 using Screenbox.Core.Services;
 using Windows.Storage;
 using Windows.Storage.Search;
@@ -39,6 +40,8 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private readonly IFilesService _filesService;
     private readonly INavigationService _navigationService;
     private readonly StorageItemViewModelFactory _storageVmFactory;
+    private readonly IArtworkService _artworkService;
+    private readonly IDatabaseService _databaseService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _loadingTimer;
     private readonly List<MediaViewModel> _playableItems = [];
@@ -46,11 +49,13 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private object? _source;
 
     public FolderViewPageViewModel(IFilesService filesService, INavigationService navigationService,
-        StorageItemViewModelFactory storageVmFactory)
+        StorageItemViewModelFactory storageVmFactory, IArtworkService artworkService, IDatabaseService databaseService)
     {
         _filesService = filesService;
         _storageVmFactory = storageVmFactory;
         _navigationService = navigationService;
+        _artworkService = artworkService;
+        _databaseService = databaseService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _loadingTimer = _dispatcherQueue.CreateTimer();
 
@@ -130,6 +135,25 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     public void OnNavigatedFrom()
     {
         _isActive = false;
+    }
+
+    /// <summary>
+    /// Persists an edited folder title and, when supplied, a new manual poster.
+    /// An empty title clears the custom title so the folder name is used again.
+    /// </summary>
+    public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster)
+    {
+        FolderMetadataDto metadata =
+            await _databaseService.LoadFolderMetadataAsync(folder.Path)
+            ?? new FolderMetadataDto { Path = folder.Path };
+
+        metadata.CustomTitle = string.IsNullOrWhiteSpace(title) ? null : title;
+        await _databaseService.SaveFolderMetadataAsync(metadata);
+
+        if (poster is not null)
+        {
+            await _artworkService.SetManualPosterAsync(folder, poster);
+        }
     }
 
     protected virtual void Navigate(object? parameter = null)

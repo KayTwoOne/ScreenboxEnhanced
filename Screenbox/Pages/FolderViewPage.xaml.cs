@@ -3,6 +3,8 @@ using CommunityToolkit.WinUI;
 using Microsoft.UI.Xaml.Controls;
 using Screenbox.Behaviors;
 using Screenbox.Core.ViewModels;
+using Screenbox.Dialogs;
+using Windows.Storage;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
@@ -93,5 +95,19 @@ public sealed partial class FolderViewPage : Page
     private void ScrollViewerOnViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
         Common.SavePageState(e.NextView.VerticalOffset, nameof(FolderViewPage), Frame.BackStackDepth);
+    }
+
+    [DynamicWindowsRuntimeCast(typeof(StorageFolder))]
+    private async void EditFolder_OnClick(object sender, RoutedEventArgs e)
+    {
+        StorageItemViewModel? item = ViewModel.ContextItem;
+        if (item?.StorageItem is not StorageFolder folder) return;
+
+        var dialog = new EditFolderDialog(item.DisplayName);
+        EditFolderResult? result = await dialog.GetResultAsync();
+        if (result is null) return;
+
+        await ViewModel.ApplyFolderEditAsync(folder, result.Title, result.Poster);
+        await item.LoadArtworkAsync();
     }
 }

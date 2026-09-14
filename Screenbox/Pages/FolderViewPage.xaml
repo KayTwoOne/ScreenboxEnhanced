@@ -86,6 +86,11 @@
                         <commands:SetPlaybackOptionsCommand PlayCommand="{x:Bind ViewModel.PlayCommand}" />
                     </MenuFlyoutItem.Command>
                 </MenuFlyoutItem>
+                <MenuFlyoutSeparator Visibility="{x:Bind ViewModel.ContextItem.IsFolder, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+                <MenuFlyoutItem
+                    Click="EditFolder_OnClick"
+                    Text="{x:Bind strings:Resources.EditFolder}"
+                    Visibility="{x:Bind ViewModel.ContextItem.IsFolder, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
             </MenuFlyout>
         </ResourceDictionary>
     </Page.Resources>

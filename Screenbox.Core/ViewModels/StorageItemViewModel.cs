@@ -25,6 +25,12 @@ public sealed partial class StorageItemViewModel : ObservableObject
 
     public bool IsFile { get; }
 
+    /// <summary>
+    /// <see langword="true"/> when this item is a folder; the complement of <see cref="IsFile"/>.
+    /// Used by the view layer to show folder-only affordances such as the edit-folder context menu item.
+    /// </summary>
+    public bool IsFolder => !IsFile;
+
     [ObservableProperty] public partial string CaptionText { get; set; }
     [ObservableProperty] public partial uint ItemCount { get; set; }
     [ObservableProperty] public partial BitmapImage? Thumbnail { get; set; }
