@@ -1,7 +1,11 @@
+using System;
 using System.Threading.Tasks;
+using CommunityToolkit.Mvvm.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Screenbox.Core.Helpers;
+using Screenbox.Core.Services;
 using Screenbox.Helpers;
 using Windows.Storage;
-using Windows.Storage.Pickers;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Media.Imaging;
@@ -15,11 +19,15 @@ public sealed record EditFolderResult(string Title, StorageFile? Poster);
 
 public sealed partial class EditFolderDialog : ContentDialog
 {
+    private readonly IFilesService _filesService;
+    private readonly ILogger<EditFolderDialog> _logger;
     private StorageFile? _chosenImage;
 
     [DynamicWindowsRuntimeCast(typeof(FrameworkElement))]
     public EditFolderDialog(string currentTitle)
     {
+        _filesService = Ioc.Default.GetRequiredService<IFilesService>();
+        _logger = DefaultLogging.CreateLogger<EditFolderDialog>();
         this.DefaultStyleKey = typeof(ContentDialog);
         this.InitializeComponent();
         FlowDirection = GlobalizationHelper.GetFlowDirection();
@@ -36,23 +44,31 @@ public sealed partial class EditFolderDialog : ContentDialog
         return new EditFolderResult(TitleTextBox.Text.Trim(), _chosenImage);
     }
 
+    // An unhandled exception in an async void event handler terminates the app, and the file picker
+    // throws for reasons outside this dialog's control: another picker already open, the dialog
+    // dismissed mid-pick, or a file that cannot be read. Failing to pick an image must only leave
+    // the poster unchanged.
     private async void ChooseImageButton_OnClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker { ViewMode = PickerViewMode.Thumbnail };
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".png");
+        try
+        {
+            // Reuses the shared picker so the dialog inherits the app's thumbnail view mode and
+            // suggested start location instead of hand-rolling a picker that has neither.
+            StorageFile? file = await _filesService.PickFileAsync(".jpg", ".jpeg", ".png");
+            if (file is null) return;
 
-        StorageFile? file = await picker.PickSingleFileAsync();
-        if (file is null) return;
+            _chosenImage = file;
 
-        _chosenImage = file;
-
-        using Windows.Storage.Streams.IRandomAccessStream stream =
-            await file.OpenAsync(FileAccessMode.Read);
-        var bitmap = new BitmapImage();
-        await bitmap.SetSourceAsync(stream);
-        PreviewImage.Source = bitmap;
-        PreviewImage.Visibility = Visibility.Visible;
+            using Windows.Storage.Streams.IRandomAccessStream stream =
+                await file.OpenAsync(FileAccessMode.Read);
+            var bitmap = new BitmapImage();
+            await bitmap.SetSourceAsync(stream);
+            PreviewImage.Source = bitmap;
+            PreviewImage.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to choose a folder poster image.");
+        }
     }
 }
