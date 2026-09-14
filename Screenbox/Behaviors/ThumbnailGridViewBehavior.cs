@@ -35,6 +35,7 @@ internal sealed partial class ThumbnailGridViewBehavior : Behavior<GridView>
                 {
                     await storageItem.Media.LoadThumbnailAsync();
                 }
+                await storageItem.LoadArtworkAsync();
                 break;
         }
     }

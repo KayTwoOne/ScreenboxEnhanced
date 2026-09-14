@@ -144,7 +144,7 @@
             <GridView.ItemTemplate>
                 <DataTemplate x:DataType="viewModels:StorageItemViewModel">
                     <controls:CommonGridViewItem
-                        Title="{x:Bind Name, Mode=OneWay}"
+                        Title="{x:Bind DisplayName, Mode=OneWay}"
                         Width="{StaticResource WideGridViewItemWidth}"
                         AutomationProperties.Name="{x:Bind helpers:ItemLabelHelper.FormatAccessibleStorageItemName(IsFile, Name, CaptionText, ItemCount), Mode=OneWay}"
                         CanPlay="{x:Bind IsFile}"
@@ -153,7 +153,7 @@
                         PlayCommand="{StaticResource MediaListViewItemPlayCommand}"
                         PlayCommandParameter="{x:Bind}"
                         ThumbnailHeight="{StaticResource WideGridViewItemThumbnailHeight}"
-                        ThumbnailSource="{x:Bind Media.Thumbnail, Mode=OneWay, FallbackValue={x:Null}}">
+                        ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay, FallbackValue={x:Null}}">
                         <controls:CommonGridViewItem.PlaceholderIconSource>
                             <FontIconSource FontSize="{StaticResource WideGridItemPlaceholderIconFontSize}" Glyph="{x:Bind converters:GlyphConverter.ToStorageItemGlyph(StorageItem)}" />
                         </controls:CommonGridViewItem.PlaceholderIconSource>

@@ -114,12 +114,21 @@ public sealed partial class StorageItemViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Loads the custom title and poster artwork for a folder. Does nothing for files,
-    /// whose artwork already comes from <see cref="MediaViewModel.Thumbnail"/>.
+    /// Loads the display artwork for this item. For files, this copies the already-loaded
+    /// <see cref="MediaViewModel.Thumbnail"/>; callers must load that first (see
+    /// <see cref="MediaViewModel.LoadThumbnailAsync"/>). For folders, this loads the custom
+    /// title and poster artwork.
     /// </summary>
     [DynamicWindowsRuntimeCast(typeof(StorageFolder))]
-    public async Task LoadFolderArtworkAsync()
+    [DynamicWindowsRuntimeCast(typeof(StorageFile))]
+    public async Task LoadArtworkAsync()
     {
+        if (StorageItem is StorageFile)
+        {
+            Thumbnail = Media?.Thumbnail;
+            return;
+        }
+
         if (StorageItem is not StorageFolder folder || string.IsNullOrEmpty(folder.Path)) return;
 
         try
