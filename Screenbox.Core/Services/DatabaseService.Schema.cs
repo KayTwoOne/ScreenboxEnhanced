@@ -65,6 +65,7 @@ public sealed partial class DatabaseService
         EnsureReplaceableTable(connection, "playback_progress", CreatePlaybackProgressSql, "location", "position_ticks");
         EnsurePlaylistsTable(connection);
         EnsurePlaylistItemsTable(connection);
+        EnsureFolderMetadataTable(connection);
         migrationComplete = await TryImportLegacyPlaylistsAsync(connection);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
@@ -92,6 +93,7 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreatePlaybackProgressSql);
         ExecuteNonQuery(connection, CreatePlaylistsSql);
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
+        ExecuteNonQuery(connection, CreateFolderMetadataSql);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
     }
@@ -148,6 +150,30 @@ public sealed partial class DatabaseService
 
         ExecuteNonQuery(connection, "DROP TABLE playlist_items;");
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
+    }
+
+    // `folder_metadata` is durable, user-authored data (custom titles, poster choices).
+    // This mirrors EnsurePlaylistsTable deliberately: it must never be registered with
+    // EnsureReplaceableTable, which drops the table outright on column drift.
+    private static void EnsureFolderMetadataTable(SqliteConnection connection)
+    {
+        HashSet<string> actualColumns = ReadTableColumns(connection, "folder_metadata");
+        string[] expectedColumns =
+            ["path", "custom_title", "poster_file", "poster_source", "provider_pin", "sort_order"];
+
+        if (actualColumns.Count is 0)
+        {
+            ExecuteNonQuery(connection, CreateFolderMetadataSql);
+            return;
+        }
+
+        if (!HasSchemaDrift(actualColumns, expectedColumns))
+        {
+            return;
+        }
+
+        ExecuteNonQuery(connection, "DROP TABLE folder_metadata;");
+        ExecuteNonQuery(connection, CreateFolderMetadataSql);
     }
 
     private async Task<bool> TryImportLegacyPlaylistsAsync(SqliteConnection connection)
@@ -381,6 +407,17 @@ public sealed partial class DatabaseService
             playlist_id TEXT    NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
             path        TEXT    NOT NULL,
             sort_order  INTEGER NOT NULL
+        );
+        """;
+
+    private const string CreateFolderMetadataSql = """
+        CREATE TABLE IF NOT EXISTS folder_metadata (
+            path          TEXT PRIMARY KEY,
+            custom_title  TEXT,
+            poster_file   TEXT,
+            poster_source INTEGER NOT NULL DEFAULT 0,
+            provider_pin  TEXT,
+            sort_order    INTEGER
         );
         """;
 }

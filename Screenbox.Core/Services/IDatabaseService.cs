@@ -45,4 +45,13 @@ public interface IDatabaseService
 
     /// <summary>Deletes a playlist and cascades to its items.</summary>
     Task DeletePlaylistAsync(string id);
+
+    /// <summary>Saves durable, user-authored metadata for a single folder.</summary>
+    Task SaveFolderMetadataAsync(FolderMetadataDto metadata);
+
+    /// <summary>Loads folder metadata, or null when the folder has none.</summary>
+    Task<FolderMetadataDto?> LoadFolderMetadataAsync(string path);
+
+    /// <summary>Removes folder metadata.</summary>
+    Task DeleteFolderMetadataAsync(string path);
 }
