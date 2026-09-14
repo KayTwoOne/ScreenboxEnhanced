@@ -140,10 +140,7 @@ public sealed partial class StorageItemViewModel : ObservableObject
         try
         {
             FolderMetadataDto? metadata = await _databaseService.LoadFolderMetadataAsync(folder.Path);
-            if (metadata?.CustomTitle is { Length: > 0 } title)
-            {
-                DisplayName = title;
-            }
+            DisplayName = metadata?.CustomTitle is { Length: > 0 } title ? title : Name;
 
             string? posterFile = await _artworkService.GetPosterFileNameAsync(folder);
             if (posterFile is not { Length: > 0 }) return;

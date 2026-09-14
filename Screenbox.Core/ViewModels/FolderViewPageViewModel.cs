@@ -139,7 +139,8 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
 
     /// <summary>
     /// Persists an edited folder title and, when supplied, a new manual poster.
-    /// An empty title clears the custom title so the folder name is used again.
+    /// An empty title, or a title that matches the folder's on-disk name, clears the custom
+    /// title so the folder name is used again (and stays in sync if the folder is later renamed).
     /// </summary>
     public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster)
     {
@@ -147,7 +148,8 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
             await _databaseService.LoadFolderMetadataAsync(folder.Path)
             ?? new FolderMetadataDto { Path = folder.Path };
 
-        metadata.CustomTitle = string.IsNullOrWhiteSpace(title) ? null : title;
+        bool isDefaultTitle = string.IsNullOrWhiteSpace(title) || title == folder.Name;
+        metadata.CustomTitle = isDefaultTitle ? null : title;
         await _databaseService.SaveFolderMetadataAsync(metadata);
 
         if (poster is not null)
