@@ -46,6 +46,19 @@ public sealed class ArtworkService : IArtworkService
             && ConventionExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// True when a convention-file poster has already been copied into local storage and
+    /// recorded for this folder, so re-copying and re-writing metadata would be redundant.
+    /// <see cref="GetPosterFileNameAsync"/> is called once per item on every folder navigation,
+    /// so this check keeps that hot path free of unnecessary file and database I/O.
+    /// </summary>
+    public static bool ShouldSkipConventionCopy(FolderMetadataDto? metadata, string expectedFileName, bool destinationFileExists)
+    {
+        return destinationFileExists
+            && metadata is { PosterSource: PosterSource.Convention, PosterFile: { Length: > 0 } existingFileName }
+            && string.Equals(existingFileName, expectedFileName, StringComparison.Ordinal);
+    }
+
     /// <inheritdoc/>
     public async Task<string?> GetPosterFileNameAsync(StorageFolder folder)
     {
@@ -64,6 +77,17 @@ public sealed class ArtworkService : IArtworkService
             {
                 if (decision.Source is PosterSource.Convention && conventionFile is not null)
                 {
+                    string expectedFileName = BuildFileName(
+                        folder.Path, PosterSource.Convention, System.IO.Path.GetExtension(conventionFile.Name));
+                    bool destinationExists = await artworkFolder.TryGetItemAsync(expectedFileName) is not null;
+
+                    // Convention posters are resolved on every navigation into a folder, so avoid
+                    // re-copying the file and re-writing the database row when nothing has changed.
+                    if (ShouldSkipConventionCopy(metadata, expectedFileName, destinationExists))
+                    {
+                        return expectedFileName;
+                    }
+
                     return await CopyIntoArtworkFolderAsync(folder, conventionFile, PosterSource.Convention);
                 }
 
@@ -129,17 +153,52 @@ public sealed class ArtworkService : IArtworkService
         return null;
     }
 
-    private static async Task<StorageFile?> FindFirstVideoAsync(StorageFolder folder, int depth)
+    private async Task<StorageFile?> FindFirstVideoAsync(StorageFolder folder, int depth)
     {
         if (depth <= 0) return null;
 
-        IReadOnlyList<StorageFile> files = await folder.GetFilesAsync();
+        IReadOnlyList<StorageFile> files;
+        try
+        {
+            files = await folder.GetFilesAsync();
+        }
+        catch (Exception e)
+        {
+            // A locked folder, a permissions failure, or a disconnected network path should not
+            // abort the search for the whole tree — just skip what can't be read.
+            _logger.LogWarning(e, "Failed to enumerate files in '{Path}' while searching for a video.", folder.Path);
+            return null;
+        }
+
         StorageFile? video = files.FirstOrDefault(f => f.ContentType.StartsWith("video", StringComparison.OrdinalIgnoreCase));
         if (video is not null) return video;
 
-        foreach (StorageFolder sub in await folder.GetFoldersAsync())
+        IReadOnlyList<StorageFolder> subfolders;
+        try
         {
-            StorageFile? found = await FindFirstVideoAsync(sub, depth - 1);
+            subfolders = await folder.GetFoldersAsync();
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to enumerate subfolders in '{Path}' while searching for a video.", folder.Path);
+            return null;
+        }
+
+        foreach (StorageFolder sub in subfolders)
+        {
+            StorageFile? found;
+            try
+            {
+                found = await FindFirstVideoAsync(sub, depth - 1);
+            }
+            catch (Exception e)
+            {
+                // One unreadable subtree (e.g. a locked "Extras" folder) should not cost the
+                // whole series its artwork - skip it and keep searching sibling subfolders.
+                _logger.LogWarning(e, "Failed to search subfolder '{Path}' for a video.", sub.Path);
+                continue;
+            }
+
             if (found is not null) return found;
         }
 
