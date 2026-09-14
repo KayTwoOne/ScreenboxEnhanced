@@ -166,6 +166,66 @@ public sealed class FolderMetadataTests
     }
 
     [Test]
+    public async Task SetFolderPosterAsync_PreservesTheCustomTitleAndReportsTheSupersededFile()
+    {
+        // The artwork writer and the title editor share one row. A full-row write built from a
+        // stale read used to blank whichever column the other side had just set.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Ranma";
+
+        await db.SetFolderCustomTitleAsync(path, "Ranma 1/2");
+        string? supersededOnFirstWrite = await db.SetFolderPosterAsync(path, "g_1111_aa.jpg", PosterSource.AutoFrame);
+        string? supersededOnSecondWrite = await db.SetFolderPosterAsync(path, "m_1111_bb.png", PosterSource.Manual);
+
+        await Assert.That(supersededOnFirstWrite).IsNull().Because("There was no poster to replace.");
+        await Assert.That(supersededOnSecondWrite).IsEqualTo("g_1111_aa.jpg")
+            .Because("The caller has to know which file to delete so replaced artwork is not orphaned.");
+
+        FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(loaded!.CustomTitle).IsEqualTo("Ranma 1/2");
+        await Assert.That(loaded.PosterFile).IsEqualTo("m_1111_bb.png");
+        await Assert.That(loaded.PosterSource).IsEqualTo(PosterSource.Manual);
+    }
+
+    [Test]
+    public async Task SetFolderCustomTitleAsync_PreservesThePosterColumns()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Kaiju No 8";
+
+        await db.SetFolderPosterAsync(path, "m_2222_cc.jpg", PosterSource.Manual);
+        await db.SetFolderCustomTitleAsync(path, "Kaiju No. 8");
+
+        FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(loaded!.PosterFile).IsEqualTo("m_2222_cc.jpg");
+        await Assert.That(loaded.PosterSource).IsEqualTo(PosterSource.Manual);
+        await Assert.That(loaded.CustomTitle).IsEqualTo("Kaiju No. 8");
+
+        // Clearing the title back to the folder name must not take the poster with it.
+        await db.SetFolderCustomTitleAsync(path, null);
+        FolderMetadataDto? cleared = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(cleared!.CustomTitle).IsNull();
+        await Assert.That(cleared.PosterFile).IsEqualTo("m_2222_cc.jpg");
+    }
+
+    [Test]
+    public async Task ListFolderMetadataAsync_ReturnsEveryStoredRow()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        await db.SetFolderCustomTitleAsync(@"D:\Media\A", "A");
+        await db.SetFolderPosterAsync(@"D:\Media\B", "g_3333_dd.jpg", PosterSource.AutoFrame);
+
+        List<FolderMetadataDto> rows = await db.ListFolderMetadataAsync();
+
+        await Assert.That(rows.Count).IsEqualTo(2);
+        await Assert.That(rows.Any(r => r.Path == @"D:\Media\A" && r.CustomTitle == "A")).IsTrue();
+        await Assert.That(rows.Any(r => r.Path == @"D:\Media\B" && r.PosterFile == "g_3333_dd.jpg")).IsTrue();
+    }
+
+    [Test]
     public async Task DeleteFolderMetadataAsync_RemovesTheRecord()
     {
         using var fixture = new TestDirectoryFixture();

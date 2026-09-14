@@ -144,13 +144,11 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     /// </summary>
     public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster)
     {
-        FolderMetadataDto metadata =
-            await _databaseService.LoadFolderMetadataAsync(folder.Path)
-            ?? new FolderMetadataDto { Path = folder.Path };
-
+        // Writes the title column only. Reading the row, editing it in memory and writing it back
+        // whole would race the artwork writer, which shares this row, and would undo a poster
+        // recorded while the dialog was open.
         bool isDefaultTitle = string.IsNullOrWhiteSpace(title) || title == folder.Name;
-        metadata.CustomTitle = isDefaultTitle ? null : title;
-        await _databaseService.SaveFolderMetadataAsync(metadata);
+        await _databaseService.SetFolderCustomTitleAsync(folder.Path, isDefaultTitle ? null : title);
 
         if (poster is not null)
         {

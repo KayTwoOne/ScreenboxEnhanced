@@ -7,7 +7,10 @@ namespace Screenbox.Core.Services;
 
 /// <summary>
 /// Manages the application's SQLite database.
-/// The database acts as a quick cache layer; data loss is handled gracefully by recreating the database.
+/// Most tables are a quick cache layer that can be rebuilt by rescanning the libraries, but
+/// <c>playlists</c>, <c>playlist_items</c> and <c>folder_metadata</c> hold durable, user-authored
+/// data that cannot be reconstructed. Schema changes migrate those tables rather than dropping
+/// them; whole-file recovery from a corrupt database still loses them.
 /// </summary>
 public interface IDatabaseService
 {
@@ -46,11 +49,32 @@ public interface IDatabaseService
     /// <summary>Deletes a playlist and cascades to its items.</summary>
     Task DeletePlaylistAsync(string id);
 
-    /// <summary>Saves durable, user-authored metadata for a single folder.</summary>
+    /// <summary>
+    /// Saves durable, user-authored metadata for a single folder, replacing the whole row.
+    /// Prefer <see cref="SetFolderPosterAsync"/> or <see cref="SetFolderCustomTitleAsync"/> when
+    /// only some columns are owned by the caller: a full-row write built from a stale read
+    /// silently discards whatever another writer changed in the meantime.
+    /// </summary>
     Task SaveFolderMetadataAsync(FolderMetadataDto metadata);
 
     /// <summary>Loads folder metadata, or null when the folder has none.</summary>
     Task<FolderMetadataDto?> LoadFolderMetadataAsync(string path);
+
+    /// <summary>Lists every stored folder metadata row, for maintenance such as evicting orphans.</summary>
+    Task<List<FolderMetadataDto>> ListFolderMetadataAsync();
+
+    /// <summary>
+    /// Records a folder's poster without reading or rewriting any other column, creating the row
+    /// when it does not exist. Returns the poster file name that was stored before, or null when
+    /// there was none, so the caller can delete the superseded file.
+    /// </summary>
+    Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source);
+
+    /// <summary>
+    /// Sets a folder's custom display title, or clears it when <paramref name="customTitle"/> is
+    /// null, without touching any other column.
+    /// </summary>
+    Task SetFolderCustomTitleAsync(string path, string? customTitle);
 
     /// <summary>Removes folder metadata.</summary>
     Task DeleteFolderMetadataAsync(string path);
