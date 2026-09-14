@@ -93,4 +93,17 @@ public sealed class ArtworkResolverTests
 
         await Assert.That(decision.Source).IsEqualTo(PosterSource.Manual);
     }
+
+    [Test]
+    public async Task Resolve_PrefersConventionOverCachedFrame()
+    {
+        var metadata = new FolderMetadataDto
+        {
+            Path = @"D:\x", PosterFile = "frame.jpg", PosterSource = PosterSource.AutoFrame
+        };
+
+        ArtworkDecision decision = ArtworkResolver.Resolve(metadata, hasConventionFile: true, hasCachedFrame: true);
+
+        await Assert.That(decision.Source).IsEqualTo(PosterSource.Convention);
+    }
 }
