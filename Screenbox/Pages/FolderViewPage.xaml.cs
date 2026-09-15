@@ -26,6 +26,7 @@ public sealed partial class FolderViewPage : Page
 
     private double _contentVerticalOffset;
     private ScrollViewer? _scrollViewer;
+    private Windows.UI.Xaml.Controls.MenuFlyout? _folderFlyout;
 
     public FolderViewPage()
     {
@@ -74,10 +75,36 @@ public sealed partial class FolderViewPage : Page
 
     private void FolderView_OnItemContextRequested(ListViewContextBehavior sender, ListViewContextRequestedEventArgs e)
     {
-        if (e.Item.Content is not StorageItemViewModel content || content.Media == null)
+        if (e.Item.Content is not StorageItemViewModel content)
         {
             e.Handled = true;
+            return;
         }
+
+        // Swap the flyout before the behavior shows it. Every item in ItemFlyout binds to
+        // ContextItem.Media, which is null for a folder, so folders get their own menu instead
+        // of the file menu with most of its entries hidden.
+        sender.Flyout = content.IsFolder
+            ? _folderFlyout ??= BuildFolderFlyout()
+            : (Windows.UI.Xaml.Controls.MenuFlyout)Resources["ItemFlyout"];
+    }
+
+    /// <summary>
+    /// Builds the folder context menu in code rather than as a XAML resource. A MenuFlyout
+    /// resource that nothing in the markup references never gets its compiled bindings
+    /// connected, so declaring it with x:Bind is not viable here.
+    /// </summary>
+    private Windows.UI.Xaml.Controls.MenuFlyout BuildFolderFlyout()
+    {
+        var editItem = new Windows.UI.Xaml.Controls.MenuFlyoutItem
+        {
+            Text = Strings.Resources.EditFolder
+        };
+        editItem.Click += EditFolder_OnClick;
+
+        var flyout = new Windows.UI.Xaml.Controls.MenuFlyout();
+        flyout.Items.Add(editItem);
+        return flyout;
     }
 
     private void BreadcrumbBar_OnItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
