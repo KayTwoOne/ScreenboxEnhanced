@@ -84,6 +84,29 @@ public sealed class WatchStateServiceTests
     }
 
     [Test]
+    public async Task LoadAsync_CalledAgain_DoesNotReloadAndRegressCachedState()
+    {
+        // LoadAsync must guard itself so external callers (e.g. two SeekBarViewModel instances
+        // both observing an unrelated "is loaded" flag as false) can call it more than once
+        // without harm. Prove this discriminates a real reload: after the first LoadAsync (in
+        // CreateAsync) and a RecordProgressAsync call, write a stale row directly to the
+        // database that would regress the cached state if a second LoadAsync actually re-queried
+        // it. A working guard leaves the cache untouched; a missing guard would flip it back.
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, DatabaseService db) = await CreateAsync(fixture.DirectoryPath);
+        const string loc = @"D:\EP6.MKV";
+
+        await service.RecordProgressAsync(loc, TimeSpan.FromMinutes(19), TimeSpan.FromMinutes(20));
+        await Assert.That(service.IsWatched(loc)).IsTrue();
+
+        await db.SaveWatchStateAsync(new WatchStateDto { Location = loc, Completed = false });
+
+        await service.LoadAsync();
+
+        await Assert.That(service.IsWatched(loc)).IsTrue();
+    }
+
+    [Test]
     public async Task GetContinueWatching_ReturnsPartiallyWatchedNewestFirstAndExcludesFinished()
     {
         using var fixture = new TestDirectoryFixture();

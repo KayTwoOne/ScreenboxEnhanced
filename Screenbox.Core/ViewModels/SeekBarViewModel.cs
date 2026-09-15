@@ -167,6 +167,7 @@ public sealed partial class SeekBarViewModel :
             if (!_playbackProgressTracker.IsLoaded)
             {
                 await _playbackProgressTracker.LoadFromDiskAsync();
+                _watchStateService.ThresholdPercent = _settingsService.WatchedThresholdPercent;
                 await _watchStateService.LoadAsync();
                 if (_currentItem != null)
                 {

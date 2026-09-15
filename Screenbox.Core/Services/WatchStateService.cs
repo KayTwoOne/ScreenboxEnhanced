@@ -19,6 +19,13 @@ public sealed class WatchStateService : IWatchStateService
     private readonly ILogger<WatchStateService> _logger;
     private readonly ConcurrentDictionary<string, WatchStateDto> _cache = new(StringComparer.OrdinalIgnoreCase);
 
+    // Guards LoadAsync so it is safe and cheap to call more than once. Callers should not need
+    // to know that loading happens exactly once - the external "is loaded" flags they gate on
+    // (e.g. IPlaybackProgressTracker.IsLoaded) belong to a different component and are not a
+    // reliable signal for this service. Only set on a SUCCESSFUL load: a transient database
+    // failure must not permanently latch the cache as empty for the rest of the session.
+    private volatile bool _isLoaded;
+
     public WatchStateService(IDatabaseService databaseService, ILogger<WatchStateService> logger)
     {
         _databaseService = databaseService;
@@ -38,6 +45,12 @@ public sealed class WatchStateService : IWatchStateService
     /// <inheritdoc/>
     public async Task LoadAsync()
     {
+        // Already loaded: return immediately rather than re-querying the database. This also
+        // protects the in-memory cache from being overwritten by an older snapshot on disk if
+        // something calls LoadAsync again after RecordProgressAsync/SetWatchedAsync have already
+        // moved the cache ahead of what was last persisted.
+        if (_isLoaded) return;
+
         try
         {
             foreach (WatchStateDto row in await _databaseService.ListWatchStateAsync())
@@ -46,10 +59,14 @@ public sealed class WatchStateService : IWatchStateService
                 row.Location = normalized;
                 _cache[normalized] = row;
             }
+
+            _isLoaded = true;
         }
         catch (Exception e)
         {
             // Watched state is an enhancement. Failing to load it must not stop the app starting.
+            // Do not set _isLoaded here: a transient failure should not permanently leave the
+            // cache empty for the rest of the session - a later call should retry.
             _logger.LogError(e, "Failed to load watch state.");
         }
     }
