@@ -435,6 +435,9 @@
   <data name="NoNetworkDrivePanelSubtext" xml:space="preserve">
     <value>Can't find your media? Make sure your network device is paired in the Windows Settings.</value>
   </data>
+  <data name="ContinueWatching" xml:space="preserve">
+    <value>Continue watching</value>
+  </data>
   <data name="Recent" xml:space="preserve">
     <value>Recent</value>
   </data>

@@ -163,6 +163,8 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -207,8 +209,43 @@
         </Grid>
 
         <Grid
-            x:Name="RecentSubHeaderGrid"
+            x:Name="ContinueWatchingSubHeaderGrid"
             Grid.Row="1"
+            MinHeight="48"
+            Padding="{StaticResource ContentPagePadding}">
+            <TextBlock
+                x:Name="ContinueWatchingHeaderText"
+                VerticalAlignment="Center"
+                AutomationProperties.HeadingLevel="Level2"
+                Style="{StaticResource SubtitleTextBlockStyle}"
+                Text="{x:Bind strings:Resources.ContinueWatching}" />
+        </Grid>
+
+        <GridView
+            x:Name="ContinueWatchingGridView"
+            Grid.Row="2"
+            Margin="0,16,0,0"
+            Padding="{StaticResource GridViewContentPagePadding}"
+            ui:ListViewExtensions.Command="{x:Bind ViewModel.PlayCommand}"
+            IsItemClickEnabled="True"
+            ItemContainerStyle="{StaticResource GridViewItemMediaCardStyle}"
+            ItemTemplate="{StaticResource MediaGridViewItemTemplate}"
+            ItemsSource="{x:Bind ViewModel.ContinueWatching}"
+            KeyboardAcceleratorPlacementMode="Hidden"
+            ScrollViewer.VerticalScrollBarVisibility="Disabled"
+            ScrollViewer.VerticalScrollMode="Disabled"
+            SelectionMode="None">
+            <GridView.Resources>
+                <commands:BindableCommand x:Key="MediaListViewItemPlayCommand" Command="{x:Bind ViewModel.PlayCommand}" />
+            </GridView.Resources>
+            <interactivity:Interaction.Behaviors>
+                <behaviors:ThumbnailGridViewBehavior />
+            </interactivity:Interaction.Behaviors>
+        </GridView>
+
+        <Grid
+            x:Name="RecentSubHeaderGrid"
+            Grid.Row="3"
             MinHeight="48"
             Padding="{StaticResource ContentPagePadding}">
             <TextBlock
@@ -234,7 +271,7 @@
 
         <GridView
             x:Name="RecentFilesGridView"
-            Grid.Row="2"
+            Grid.Row="4"
             Margin="0,16,0,0"
             Padding="{StaticResource GridViewContentPagePadding}"
             ui:ListViewExtensions.Command="{x:Bind ViewModel.PlayCommand}"
@@ -267,7 +304,7 @@
         <!--  Empty recent list  -->
         <ScrollViewer
             x:Name="WelcomeViewer"
-            Grid.Row="2"
+            Grid.Row="4"
             Margin="{x:Bind Common.FooterBottomPaddingMargin, Mode=OneWay}"
             Padding="{StaticResource ContentPagePadding}"
             HorizontalScrollBarVisibility="Disabled"
@@ -327,6 +364,8 @@
                     <VisualState.Setters>
                         <Setter Target="HeaderGrid.Padding" Value="{StaticResource ContentPageMinimalPadding}" />
                         <Setter Target="HeaderOpenButtonText.Visibility" Value="Collapsed" />
+                        <Setter Target="ContinueWatchingSubHeaderGrid.Padding" Value="{StaticResource ContentPageMinimalPadding}" />
+                        <Setter Target="ContinueWatchingGridView.Padding" Value="{StaticResource GridViewContentPageMinimalPadding}" />
                         <Setter Target="RecentSubHeaderGrid.Padding" Value="{StaticResource ContentPageMinimalPadding}" />
                         <Setter Target="RecentFilesGridView.Padding" Value="{StaticResource GridViewContentPageMinimalPadding}" />
                         <Setter Target="WelcomeViewer.Padding" Value="{StaticResource ContentPageMinimalPadding}" />
@@ -361,6 +400,19 @@
                         <Setter Target="RecentSubHeaderGrid.Visibility" Value="Collapsed" />
                         <Setter Target="WelcomeViewer.Visibility" Value="Visible" />
                         <Setter Target="WelcomePanel.IsOpen" Value="True" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+
+            <VisualStateGroup x:Name="ContinueWatchingStates">
+                <VisualState x:Name="HasContinueWatching" />
+                <VisualState x:Name="NoContinueWatching">
+                    <VisualState.StateTriggers>
+                        <ui:IsNullOrEmptyStateTrigger Value="{x:Bind ViewModel.ContinueWatching, Mode=OneWay}" />
+                    </VisualState.StateTriggers>
+                    <VisualState.Setters>
+                        <Setter Target="ContinueWatchingSubHeaderGrid.Visibility" Value="Collapsed" />
+                        <Setter Target="ContinueWatchingGridView.Visibility" Value="Collapsed" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>

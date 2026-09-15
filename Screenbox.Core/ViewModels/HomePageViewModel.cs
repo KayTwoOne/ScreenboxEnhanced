@@ -23,7 +23,16 @@ namespace Screenbox.Core.ViewModels;
 public sealed partial class HomePageViewModel : ObservableRecipient,
     IRecipient<QueueCurrentItemChangedMessage>
 {
+    /// <summary>
+    /// Matches the effective size of <see cref="Recent"/>, which is bounded by the platform's
+    /// MRU list capacity (<see cref="StorageApplicationPermissions.MostRecentlyUsedList"/> allows
+    /// at most 25 entries).
+    /// </summary>
+    private const int ContinueWatchingLimit = 25;
+
     public ObservableCollection<MediaViewModel> Recent => _recentContext.Recent;
+
+    public ObservableCollection<MediaViewModel> ContinueWatching => _watchStateContext.ContinueWatching;
 
     public SelectionViewModel Selection { get; }
 
@@ -31,6 +40,7 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
     public partial MediaViewModel? ContextMedia { get; set; }
 
     private readonly RecentContext _recentContext;
+    private readonly WatchStateContext _watchStateContext;
     private readonly MediaViewModelFactory _mediaFactory;
     private readonly IFilesService _filesService;
     private readonly ISettingsService _settingsService;
@@ -40,6 +50,7 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
 
     public HomePageViewModel(
         RecentContext recentContext,
+        WatchStateContext watchStateContext,
         SelectionViewModel selection,
         MediaViewModelFactory mediaFactory,
         IFilesService filesService,
@@ -48,6 +59,7 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
     {
         Selection = selection;
         _recentContext = recentContext;
+        _watchStateContext = watchStateContext;
         _mediaFactory = mediaFactory;
         _filesService = filesService;
         _settingsService = settingsService;
@@ -63,13 +75,23 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
 
     public void Receive(QueueCurrentItemChangedMessage message)
     {
-        if (_settingsService.ShowRecent)
-        {
-            _changeDebounceTimer.Debounce(DebouncedAction, TimeSpan.FromMilliseconds(100));
+        _changeDebounceTimer.Debounce(DebouncedAction, TimeSpan.FromMilliseconds(100));
 
-            async void DebouncedAction()
+        async void DebouncedAction()
+        {
+            try
             {
-                await UpdateRecentMediaListAsync(false).ConfigureAwait(false);
+                Task recentTask = _settingsService.ShowRecent
+                    ? UpdateRecentMediaListAsync(false)
+                    : Task.CompletedTask;
+                await Task.WhenAll(recentTask, RefreshContinueWatchingAsync());
+            }
+            catch (Exception e)
+            {
+                // This callback runs detached from any awaiter (fire-and-forget via the debounce
+                // timer), so an unhandled exception here would otherwise escape as an unobserved
+                // async void failure and take down the app with no crash log.
+                _logger.LogError(e, "Failed to refresh home page content after queue change.");
             }
         }
     }
@@ -100,9 +122,10 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
     private async Task UpdateContentAsync()
     {
         // Update recent media
+        Task recentTask;
         if (_settingsService.ShowRecent)
         {
-            await UpdateRecentMediaListAsync(true);
+            recentTask = UpdateRecentMediaListAsync(true);
         }
         else
         {
@@ -113,6 +136,23 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
                 _recentContext.TokenToMediaMappings.Clear();
                 _recentContext.IsLoaded = true;
             }
+            recentTask = Task.CompletedTask;
+        }
+
+        await Task.WhenAll(recentTask, RefreshContinueWatchingAsync());
+    }
+
+    private async Task RefreshContinueWatchingAsync()
+    {
+        try
+        {
+            await _watchStateContext.RefreshAsync(ContinueWatchingLimit);
+        }
+        catch (Exception e)
+        {
+            // OnLoaded (the ultimate caller here) is async void: nothing may escape from this
+            // path or the app terminates with no crash log and no Application Error event.
+            _logger.LogError(e, "Failed to refresh continue watching list.");
         }
     }
 
