@@ -235,9 +235,6 @@
             ScrollViewer.VerticalScrollBarVisibility="Disabled"
             ScrollViewer.VerticalScrollMode="Disabled"
             SelectionMode="None">
-            <GridView.Resources>
-                <commands:BindableCommand x:Key="MediaListViewItemPlayCommand" Command="{x:Bind ViewModel.PlayCommand}" />
-            </GridView.Resources>
             <interactivity:Interaction.Behaviors>
                 <behaviors:ThumbnailGridViewBehavior />
             </interactivity:Interaction.Behaviors>

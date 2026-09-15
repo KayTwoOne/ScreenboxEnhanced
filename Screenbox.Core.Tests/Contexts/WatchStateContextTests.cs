@@ -121,6 +121,32 @@ public sealed class WatchStateContextTests
     }
 
     [Test]
+    public async Task RefreshAsync_ReusesTheSameMediaViewModelInstanceAcrossRefreshes()
+    {
+        // MediaViewModel has no Equals/GetHashCode override, and the collection-sync helper
+        // RefreshAsync uses diffs by reference equality. For a location that
+        // MediaViewModelFactory.GetOrCreate does not already recognize from the library (this
+        // test deliberately does not seed one, unlike the library-reuse test above), the factory
+        // alone hands back a brand-new instance on every call - this test proves
+        // WatchStateContext's own location-keyed cache prevents that churn by returning the SAME
+        // instance (not merely an equal one) on a second refresh of the same underlying state.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        string filePath = Path.Combine(fixture.DirectoryPath, "ep1.mkv");
+        await File.WriteAllTextAsync(filePath, "x");
+        await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+
+        await context.RefreshAsync(25);
+        MediaViewModel first = context.ContinueWatching[0];
+
+        await context.RefreshAsync(25);
+        MediaViewModel second = context.ContinueWatching[0];
+
+        await Assert.That(ReferenceEquals(first, second)).IsTrue();
+    }
+
+    [Test]
     public async Task RefreshAsync_RespectsTheLimit()
     {
         using var fixture = new TestDirectoryFixture();

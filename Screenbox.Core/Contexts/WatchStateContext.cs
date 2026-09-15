@@ -34,6 +34,21 @@ public sealed partial class WatchStateContext : ObservableObject
     private readonly MediaViewModelFactory _mediaFactory;
     private readonly ILogger<WatchStateContext> _logger;
 
+    /// <summary>
+    /// Caches the resolved <see cref="MediaViewModel"/> for each location seen on a previous
+    /// refresh, keyed by the normalized (upper-invariant) location. <see cref="MediaViewModel"/>
+    /// has no <c>Equals</c>/<c>GetHashCode</c> override, and the collection sync helper used in
+    /// <see cref="RefreshAsync"/> diffs by reference equality, so without this cache a location
+    /// that isn't already known to the library (see
+    /// <see cref="MediaViewModelFactory.GetOrCreate(StorageFile)"/>) would get a brand-new
+    /// instance from the factory on every refresh - churning the tile's thumbnail and any other
+    /// transient state on every call instead of being recognized as unchanged.
+    /// Rebuilt from scratch each refresh rather than mutated in place, so an entry that stops
+    /// resolving or falls out of the continue-watching set is dropped from the cache along with
+    /// the collection instead of lingering forever.
+    /// </summary>
+    private readonly Dictionary<string, MediaViewModel> _mediaByLocation = new(StringComparer.OrdinalIgnoreCase);
+
     public WatchStateContext(
         IWatchStateService watchStateService,
         MediaViewModelFactory mediaFactory,
@@ -56,6 +71,7 @@ public sealed partial class WatchStateContext : ObservableObject
     public async Task RefreshAsync(int limit)
     {
         List<MediaViewModel> resolved = new();
+        Dictionary<string, MediaViewModel> updatedCache = new(StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -65,12 +81,17 @@ public sealed partial class WatchStateContext : ObservableObject
             {
                 try
                 {
-                    StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(state.Location).ConfigureAwait(false);
-                    if (file == null) continue;
+                    if (!_mediaByLocation.TryGetValue(state.Location, out MediaViewModel? media))
+                    {
+                        StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(state.Location).ConfigureAwait(false);
+                        if (file == null) continue;
 
-                    MediaViewModel media = _mediaFactory.GetOrCreate(file);
+                        media = _mediaFactory.GetOrCreate(file);
+                    }
+
                     media.RefreshWatchState(_watchStateService);
                     resolved.Add(media);
+                    updatedCache[state.Location] = media;
                 }
                 catch (Exception e)
                 {
@@ -84,6 +105,15 @@ public sealed partial class WatchStateContext : ObservableObject
         catch (Exception e)
         {
             _logger.LogError(e, "Failed to load the continue-watching list.");
+        }
+
+        // Replace wholesale rather than merge: any location not resolved this round (deleted,
+        // no longer partially watched, aged out of the limit) is dropped from the cache here,
+        // not just from the collection below.
+        _mediaByLocation.Clear();
+        foreach (KeyValuePair<string, MediaViewModel> entry in updatedCache)
+        {
+            _mediaByLocation[entry.Key] = entry.Value;
         }
 
         ContinueWatching.SyncItems(resolved);
