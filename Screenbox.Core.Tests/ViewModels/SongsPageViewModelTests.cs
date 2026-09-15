@@ -1,6 +1,7 @@
 using Screenbox.Core.Contexts;
 using Screenbox.Core.Enums;
 using Screenbox.Core.Models;
+using Screenbox.Core.Services;
 using Screenbox.Core.Tests.Helpers;
 using Screenbox.Core.ViewModels;
 
@@ -8,12 +9,24 @@ namespace Screenbox.Core.Tests.ViewModels;
 
 public class SongsPageViewModelTests
 {
+    /// <summary>
+    /// TUnit can resume a test on a different thread than the one <see cref="TestInitializer"/>
+    /// ran on, so the dispatcher queue that <see cref="SongsPageViewModel"/>'s constructor
+    /// requires is not guaranteed to exist on the current thread by the time a test runs.
+    /// Re-ensuring it immediately before construction (idempotent, so cheap) is the reliable fix.
+    /// </summary>
+    private static SongsPageViewModel CreateViewModel(LibraryContext libraryContext, ISettingsService settings)
+    {
+        DispatcherQueueTestHelper.EnsureDispatcherQueue();
+        return new SongsPageViewModel(libraryContext, settings);
+    }
+
     [Test]
     public async Task Constructor_ShouldInitializeSortByFromSettings()
     {
         var settings = new TestSettingsService { PersistentSongsSortOrder = SongSortOrder.Artist };
         var libraryContext = new LibraryContext();
-        var vm = new SongsPageViewModel(libraryContext, settings);
+        var vm = CreateViewModel(libraryContext, settings);
 
         await Assert.That(vm.SortBy).IsEqualTo(SongSortOrder.Artist);
     }
@@ -23,7 +36,7 @@ public class SongsPageViewModelTests
     {
         var settings = new TestSettingsService { PersistentSongsSortOrder = SongSortOrder.Title };
         var libraryContext = new LibraryContext();
-        var vm = new SongsPageViewModel(libraryContext, settings);
+        var vm = CreateViewModel(libraryContext, settings);
 
         vm.SortBy = SongSortOrder.Album;
 
@@ -35,7 +48,7 @@ public class SongsPageViewModelTests
     {
         var settings = new TestSettingsService { PersistentSongsSortOrder = SongSortOrder.Title };
         var libraryContext = new LibraryContext();
-        var vm = new SongsPageViewModel(libraryContext, settings);
+        var vm = CreateViewModel(libraryContext, settings);
 
         vm.SetSortByCommand.Execute(SongSortOrder.DateAdded);
 
@@ -48,7 +61,7 @@ public class SongsPageViewModelTests
     {
         var settings = new TestSettingsService();
         var libraryContext = new LibraryContext();
-        var vm = new SongsPageViewModel(libraryContext, settings);
+        var vm = CreateViewModel(libraryContext, settings);
 
         await Assert.That(vm.Songs).IsEmpty();
         await Assert.That(vm.GroupedSongs).IsEmpty();

@@ -29,8 +29,16 @@ public sealed class FolderViewPageViewModelTests
     /// the database and artwork services, so the remaining constructor dependencies
     /// (files/navigation/factory) are never exercised and are safely left null.
     /// </summary>
+    /// <remarks>
+    /// TUnit can resume a test on a different thread than the one <see cref="TestInitializer"/>
+    /// ran on (e.g. after the <c>await</c>s in each test that precede this call), so the
+    /// dispatcher queue that <see cref="FolderViewPageViewModel"/>'s constructor requires is not
+    /// guaranteed to exist on the current thread by the time we get here. Re-ensuring it
+    /// immediately before construction (idempotent, so cheap) is the reliable fix.
+    /// </remarks>
     private static FolderViewPageViewModel CreateViewModel(IDatabaseService databaseService)
     {
+        DispatcherQueueTestHelper.EnsureDispatcherQueue();
         return new FolderViewPageViewModel(
             filesService: null!,
             navigationService: null!,
