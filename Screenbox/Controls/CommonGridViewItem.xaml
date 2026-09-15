@@ -12,6 +12,14 @@
     d:DesignWidth="400"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/Progress.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid Padding="4" RowSpacing="4">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -79,14 +87,14 @@
         <muxc:ProgressBar
             x:Name="WatchProgressBar"
             Grid.Row="0"
-            Height="3"
             Margin="0,0,0,1"
             VerticalAlignment="Bottom"
             IsHitTestVisible="False"
             Maximum="1"
             Minimum="0"
+            Style="{StaticResource ChapterProgressBarStyle}"
             Value="{x:Bind WatchProgress, Mode=OneWay}"
-            Visibility="{x:Bind converters:WatchStateConverter.ShouldShowProgress(IsWatched, WatchProgress), Mode=OneWay}" />
+            Visibility="{x:Bind ShouldShowProgress, Mode=OneWay}" />
 
         <Border
             x:Name="WatchedIcon"

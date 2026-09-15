@@ -45,6 +45,9 @@ public sealed partial class CommonGridViewItem : UserControl
     public static readonly DependencyProperty WatchProgressProperty = DependencyProperty.Register(
         nameof(WatchProgress), typeof(double), typeof(CommonGridViewItem), new PropertyMetadata(default(double)));
 
+    public static readonly DependencyProperty ShouldShowProgressProperty = DependencyProperty.Register(
+        nameof(ShouldShowProgress), typeof(bool), typeof(CommonGridViewItem), new PropertyMetadata(default(bool)));
+
     public bool IsPlaying
     {
         get => (bool)GetValue(IsPlayingProperty);
@@ -61,6 +64,12 @@ public sealed partial class CommonGridViewItem : UserControl
     {
         get => (double)GetValue(WatchProgressProperty);
         set => SetValue(WatchProgressProperty, value);
+    }
+
+    public bool ShouldShowProgress
+    {
+        get => (bool)GetValue(ShouldShowProgressProperty);
+        set => SetValue(ShouldShowProgressProperty, value);
     }
 
     public bool CanPlay

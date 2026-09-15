@@ -153,6 +153,7 @@
                         IsWatched="{x:Bind Media.IsWatched, Mode=OneWay}"
                         PlayCommand="{StaticResource MediaListViewItemPlayCommand}"
                         PlayCommandParameter="{x:Bind}"
+                        ShouldShowProgress="{x:Bind Media.ShouldShowProgress, Mode=OneWay}"
                         ThumbnailHeight="{StaticResource WideGridViewItemThumbnailHeight}"
                         ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay, FallbackValue={x:Null}}"
                         WatchProgress="{x:Bind Media.WatchProgress, Mode=OneWay}">

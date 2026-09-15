@@ -53,6 +53,7 @@
             IsPlaying="{x:Bind IsPlaying, Mode=OneWay}"
             IsWatched="{x:Bind IsWatched, Mode=OneWay}"
             PlayCommandParameter="{x:Bind}"
+            ShouldShowProgress="{x:Bind ShouldShowProgress, Mode=OneWay}"
             ThumbnailHeight="{StaticResource CommonGridViewItemThumbnailHeight}"
             ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay}"
             WatchProgress="{x:Bind WatchProgress, Mode=OneWay}">
@@ -71,6 +72,7 @@
             IsPlaying="{x:Bind IsPlaying, Mode=OneWay}"
             IsWatched="{x:Bind IsWatched, Mode=OneWay}"
             PlayCommandParameter="{x:Bind}"
+            ShouldShowProgress="{x:Bind ShouldShowProgress, Mode=OneWay}"
             ThumbnailHeight="{StaticResource WideGridViewItemThumbnailHeight}"
             ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay}"
             WatchProgress="{x:Bind WatchProgress, Mode=OneWay}">
