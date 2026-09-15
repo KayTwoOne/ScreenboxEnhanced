@@ -78,4 +78,16 @@ public interface IDatabaseService
 
     /// <summary>Removes folder metadata.</summary>
     Task DeleteFolderMetadataAsync(string path);
+
+    /// <summary>Saves durable watched state for a media location.</summary>
+    Task SaveWatchStateAsync(WatchStateDto state);
+
+    /// <summary>Loads watched state, or null when the location has none.</summary>
+    Task<WatchStateDto?> LoadWatchStateAsync(string location);
+
+    /// <summary>Lists all watched state rows.</summary>
+    Task<List<WatchStateDto>> ListWatchStateAsync();
+
+    /// <summary>Removes watched state for a location.</summary>
+    Task DeleteWatchStateAsync(string location);
 }

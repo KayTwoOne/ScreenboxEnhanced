@@ -67,6 +67,7 @@ public sealed partial class DatabaseService
         EnsurePlaylistsTable(connection);
         EnsurePlaylistItemsTable(connection);
         EnsureFolderMetadataTable(connection);
+        EnsureWatchStateTable(connection);
         migrationComplete = await TryImportLegacyPlaylistsAsync(connection);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
@@ -102,6 +103,7 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreatePlaylistsSql);
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
         ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
+        ExecuteNonQuery(connection, CreateWatchStateSql);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
     }
@@ -228,6 +230,72 @@ public sealed partial class DatabaseService
 
         ExecuteNonQuery(connection, $"DROP TABLE {FolderMetadataTableName};");
         ExecuteNonQuery(connection, $"ALTER TABLE {stagingTableName} RENAME TO {FolderMetadataTableName};");
+    }
+
+    // `watch_state` holds durable, unbounded watched-history data: whether each media item has been
+    // watched to completion. Unlike `playback_progress` (a capped 64-entry LRU that is rebuilt by
+    // deleting and reinserting the whole table), watch_state must never be dropped on column drift,
+    // or a user's entire watch history would be silently lost the first time a column is added.
+    // Missing columns are added with ALTER TABLE, and a shape that cannot be reached additively is
+    // rebuilt by copying the existing rows into the new table, exactly like EnsureFolderMetadataTable.
+    private static void EnsureWatchStateTable(SqliteConnection connection)
+    {
+        HashSet<string> actualColumns = ReadTableColumns(connection, WatchStateTableName);
+        if (actualColumns.Count is 0)
+        {
+            ExecuteNonQuery(connection, BuildCreateTableSql(WatchStateTableName, WatchStateColumns));
+            return;
+        }
+
+        string[] expectedColumns = WatchStateColumns.Select(column => column.Name).ToArray();
+        if (!HasSchemaDrift(actualColumns, expectedColumns))
+        {
+            return;
+        }
+
+        var expectedNames = new HashSet<string>(expectedColumns, StringComparer.OrdinalIgnoreCase);
+        bool hasUnknownColumns = actualColumns.Any(column => !expectedNames.Contains(column));
+        (string Name, string Definition)[] missingColumns =
+            WatchStateColumns.Where(column => !actualColumns.Contains(column.Name)).ToArray();
+
+        if (!hasUnknownColumns && missingColumns.All(column => CanAddColumnInPlace(column.Definition)))
+        {
+            foreach ((string name, string definition) in missingColumns)
+            {
+                ExecuteNonQuery(connection, $"ALTER TABLE {WatchStateTableName} ADD COLUMN {name} {definition};");
+            }
+
+            return;
+        }
+
+        RebuildWatchStateTable(connection, actualColumns);
+    }
+
+    /// <summary>
+    /// Copies every stored row into a table with the current shape, for drift that
+    /// <c>ALTER TABLE ... ADD COLUMN</c> cannot express (a removed or retyped column). Columns that
+    /// exist in both shapes carry their values across; anything else falls back to its default.
+    /// </summary>
+    private static void RebuildWatchStateTable(SqliteConnection connection, HashSet<string> actualColumns)
+    {
+        const string stagingTableName = "watch_state_migrating";
+        ExecuteNonQuery(connection, $"DROP TABLE IF EXISTS {stagingTableName};");
+        ExecuteNonQuery(connection, BuildCreateTableSql(stagingTableName, WatchStateColumns));
+
+        string[] sharedColumns = WatchStateColumns
+            .Where(column => actualColumns.Contains(column.Name))
+            .Select(column => column.Name)
+            .ToArray();
+
+        if (sharedColumns.Length > 0)
+        {
+            string columnList = string.Join(", ", sharedColumns);
+            ExecuteNonQuery(connection,
+                $"INSERT OR REPLACE INTO {stagingTableName} ({columnList}) SELECT {columnList} FROM {WatchStateTableName};");
+        }
+
+        ExecuteNonQuery(connection, $"DROP TABLE {WatchStateTableName};");
+        ExecuteNonQuery(connection, $"ALTER TABLE {stagingTableName} RENAME TO {WatchStateTableName};");
     }
 
     /// <summary>
@@ -497,5 +565,31 @@ public sealed partial class DatabaseService
         ("poster_source", "INTEGER NOT NULL DEFAULT 0"),
         ("provider_pin", "TEXT"),
         ("sort_order", "INTEGER")
+    ];
+
+    private const string WatchStateTableName = "watch_state";
+
+    private const string CreateWatchStateSql = """
+        CREATE TABLE IF NOT EXISTS watch_state (
+            location            TEXT PRIMARY KEY,
+            completed           INTEGER NOT NULL DEFAULT 0,
+            last_played         INTEGER,
+            duration_ticks      INTEGER,
+            last_position_ticks INTEGER NOT NULL DEFAULT 0
+        );
+        """;
+
+    /// <summary>
+    /// The single source of truth for the <c>watch_state</c> shape. The same definitions build
+    /// the CREATE TABLE statement for a new database and the ALTER TABLE statement that adds a
+    /// column to an existing one, so a column added here migrates without dropping watch history.
+    /// </summary>
+    private static readonly (string Name, string Definition)[] WatchStateColumns =
+    [
+        ("location", "TEXT PRIMARY KEY"),
+        ("completed", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_played", "INTEGER"),
+        ("duration_ticks", "INTEGER"),
+        ("last_position_ticks", "INTEGER NOT NULL DEFAULT 0")
     ];
 }
