@@ -22,15 +22,38 @@ public class LivelyWallpaperService : ILivelyWallpaperService
     {
         var localFolder = ApplicationData.Current.LocalFolder;
         var installFolder = Windows.ApplicationModel.Package.Current.InstalledLocation.Path;
-        var defaultVisualizerFolder = await StorageFolder.GetFolderFromPathAsync(Path.Combine(installFolder, "Assets", "Visualizers"));
-        var userVisualizerFolder = await localFolder.CreateFolderAsync("Visualizers", CreationCollisionOption.OpenIfExists);
-        var defaultVisualizers = await defaultVisualizerFolder.GetFoldersAsync();
-        var userVisualizers = await userVisualizerFolder.GetFoldersAsync();
+
+        // Each source is enumerated independently so one unreadable location cannot take out the
+        // other. This matters because the only caller is reached from SettingsPage.OnNavigatedTo,
+        // which is async void: an exception escaping here terminates the process rather than
+        // surfacing as an error, leaving no crash record to diagnose.
+        var defaultVisualizers = await TryGetSubfoldersAsync(
+            () => StorageFolder.GetFolderFromPathAsync(Path.Combine(installFolder, "Assets", "Visualizers")).AsTask());
+        var userVisualizers = await TryGetSubfoldersAsync(
+            () => localFolder.CreateFolderAsync("Visualizers", CreationCollisionOption.OpenIfExists).AsTask());
+
         var allVisualizers = defaultVisualizers.Select(folder => (folder, isPreset: true))
             .Concat(userVisualizers.Select(folder => (folder, isPreset: false)));
 
         var results = await Task.WhenAll(allVisualizers.Select(tuple => TryGetWallpaper(tuple.folder, tuple.isPreset)));
         return results.OfType<LivelyWallpaperModel>().ToList();
+    }
+
+    /// <summary>
+    /// Resolves a folder and returns its subfolders, or an empty list when the folder is missing
+    /// or cannot be read.
+    /// </summary>
+    private static async Task<IReadOnlyList<StorageFolder>> TryGetSubfoldersAsync(Func<Task<StorageFolder>> getFolder)
+    {
+        try
+        {
+            StorageFolder folder = await getFolder();
+            return await folder.GetFoldersAsync();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
     }
 
     public async Task<LivelyWallpaperModel?> InstallVisualizerAsync(StorageFile wallpaperFile)
