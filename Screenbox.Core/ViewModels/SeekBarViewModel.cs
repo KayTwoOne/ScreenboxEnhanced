@@ -1,10 +1,12 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using CommunityToolkit.Mvvm.Messaging.Messages;
 using CommunityToolkit.WinUI;
+using Microsoft.Extensions.Logging;
 using Screenbox.Core.Contexts;
 using Screenbox.Core.Enums;
 using Screenbox.Core.Events;
@@ -64,6 +66,8 @@ public sealed partial class SeekBarViewModel :
     private readonly DispatcherQueueTimer _seekTimer;
     private readonly DispatcherQueueTimer _originalPositionTimer;
     private readonly IPlaybackProgressTracker _playbackProgressTracker;
+    private readonly IWatchStateService _watchStateService;
+    private readonly ILogger<SeekBarViewModel> _logger;
     private TimeSpan _originalPosition;
     private TimeSpan _lastTrackedPosition;
     private bool? _seekDirection;
@@ -71,11 +75,13 @@ public sealed partial class SeekBarViewModel :
     private MediaViewModel? _currentItem;
 
     public SeekBarViewModel(ISettingsService settingsService, IPlaybackProgressTracker playbackProgressTracker,
-        PlayerContext playerContext)
+        IWatchStateService watchStateService, PlayerContext playerContext, ILogger<SeekBarViewModel> logger)
     {
         _settingsService = settingsService;
         _playbackProgressTracker = playbackProgressTracker;
+        _watchStateService = watchStateService;
         _playerContext = playerContext;
+        _logger = logger;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _bufferingTimer = _dispatcherQueue.CreateTimer();
         _seekTimer = _dispatcherQueue.CreateTimer();
@@ -161,6 +167,7 @@ public sealed partial class SeekBarViewModel :
             if (!_playbackProgressTracker.IsLoaded)
             {
                 await _playbackProgressTracker.LoadFromDiskAsync();
+                await _watchStateService.LoadAsync();
                 if (_currentItem != null)
                 {
                     RestoreLastPosition(_currentItem);
@@ -466,10 +473,23 @@ public sealed partial class SeekBarViewModel :
         if (position > TimeSpan.FromSeconds(30) && position + TimeSpan.FromSeconds(10) < NaturalDuration)
         {
             _playbackProgressTracker.UpdateProgress(_currentItem.Location, position);
+            _ = RecordWatchStateAsync(_currentItem.Location, position);
         }
         else if (position > TimeSpan.FromSeconds(5))
         {
             _playbackProgressTracker.RemovePosition(_currentItem.Location);
+        }
+    }
+
+    private async Task RecordWatchStateAsync(string location, TimeSpan position)
+    {
+        try
+        {
+            await _watchStateService.RecordProgressAsync(location, position, NaturalDuration);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to record watch state for '{Location}'.", location);
         }
     }
 }

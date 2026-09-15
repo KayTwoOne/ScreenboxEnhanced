@@ -47,6 +47,7 @@ public sealed class SettingsService : ISettingsService
     private const string PlayerGestureSlideVerticalKey = "Player/Gesture/SlideVertical";
     private const string PlayerGestureSlideHorizontalKey = "Player/Gesture/SlideHorizontal";
     private const string PlayerGesturePressAndHoldKey = "Player/Gesture/PressAndHold";
+    private const string PlayerWatchedThresholdPercentKey = "Player/WatchedThresholdPercent";
 
     public bool UseIndexer
     {
@@ -252,6 +253,12 @@ public sealed class SettingsService : ISettingsService
         set => SetValue(PersistentAlbumsSortOrderKey, (int)value);
     }
 
+    public double WatchedThresholdPercent
+    {
+        get => GetValue<double>(PlayerWatchedThresholdPercentKey);
+        set => SetValue(PlayerWatchedThresholdPercentKey, value);
+    }
+
     public SettingsService()
     {
         SetDefault(PlayerAutoResizeKey, (int)PlayerAutoResizeOption.Never);
@@ -283,6 +290,7 @@ public sealed class SettingsService : ISettingsService
         SetDefault(PlayerGestureSlideVerticalKey, true);
         SetDefault(PlayerGestureSlideHorizontalKey, true);
         SetDefault(PlayerGesturePressAndHoldKey, true);
+        SetDefault(PlayerWatchedThresholdPercentKey, WatchThreshold.DefaultPercent);
 
         // Device family specific overrides
         if (SystemInformation.IsXbox)

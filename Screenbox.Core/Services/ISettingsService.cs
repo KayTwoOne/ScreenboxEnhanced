@@ -1,4 +1,5 @@
 using Screenbox.Core.Enums;
+using Screenbox.Core.Helpers;
 using Windows.Media;
 
 namespace Screenbox.Core.Services;
@@ -148,4 +149,11 @@ public interface ISettingsService
     /// Gets or sets the preferred sort order for the albums page.
     /// </summary>
     AlbumSortOrder PersistentAlbumsSortOrder { get; set; }
+
+    /// <summary>
+    /// Gets or sets the fraction of a media item's duration that must be played back
+    /// for the item to be marked as watched.
+    /// </summary>
+    /// <value>A value between 0 and 1. The default is <see cref="WatchThreshold.DefaultPercent"/>.</value>
+    double WatchedThresholdPercent { get; set; }
 }
