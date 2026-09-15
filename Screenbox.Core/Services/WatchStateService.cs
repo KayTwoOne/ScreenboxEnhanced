@@ -25,6 +25,16 @@ public sealed class WatchStateService : IWatchStateService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Canonicalizes a location so the same path always maps to the same cache key and the
+    /// same database row, regardless of casing. <c>watch_state.location</c> is a SQLite
+    /// TEXT PRIMARY KEY with no COLLATE clause (case-sensitive BINARY collation), while the
+    /// in-memory cache compares case-insensitively — without this normalization the two would
+    /// disagree about identity and case-variant calls for the same file could silently create
+    /// diverging rows or drop state on load.
+    /// </summary>
+    private static string NormalizeLocation(string location) => location.ToUpperInvariant();
+
     /// <inheritdoc/>
     public async Task LoadAsync()
     {
@@ -32,7 +42,9 @@ public sealed class WatchStateService : IWatchStateService
         {
             foreach (WatchStateDto row in await _databaseService.ListWatchStateAsync())
             {
-                _cache[row.Location] = row;
+                string normalized = NormalizeLocation(row.Location);
+                row.Location = normalized;
+                _cache[normalized] = row;
             }
         }
         catch (Exception e)
@@ -46,29 +58,48 @@ public sealed class WatchStateService : IWatchStateService
     public async Task RecordProgressAsync(string location, TimeSpan position, TimeSpan duration)
     {
         if (string.IsNullOrEmpty(location)) return;
+        string normalized = NormalizeLocation(location);
+        bool completedNow = WatchThreshold.IsComplete(position, duration, ThresholdPercent);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        WatchStateDto state = _cache.TryGetValue(location, out WatchStateDto? existing)
-            ? existing
-            : new WatchStateDto { Location = location };
-
-        // Watched never regresses. Restarting a finished episode is a rewatch, not an unwatch.
-        state.Completed |= WatchThreshold.IsComplete(position, duration, ThresholdPercent);
-        state.LastPlayed = DateTimeOffset.UtcNow;
-        state.Duration = duration > TimeSpan.Zero ? duration : state.Duration;
-        state.LastPosition = position;
-        _cache[location] = state;
+        // Built as a new instance rather than mutated in place: the dictionary only guards
+        // slot assignment, not the fields of the object inside a slot, so two concurrent
+        // updates for the same tile could otherwise interleave their read-modify-write and
+        // lose one. AddOrUpdate's factories may run more than once under contention, but each
+        // run only reads the snapshot handed to it and builds a fresh object, so there is
+        // nothing shared left to race on.
+        WatchStateDto state = _cache.AddOrUpdate(
+            normalized,
+            _ => new WatchStateDto
+            {
+                Location = normalized,
+                // Watched never regresses; there is no prior state to OR against here.
+                Completed = completedNow,
+                LastPlayed = now,
+                Duration = duration > TimeSpan.Zero ? duration : null,
+                LastPosition = position
+            },
+            (_, existing) => new WatchStateDto
+            {
+                Location = normalized,
+                // Watched never regresses. Restarting a finished episode is a rewatch, not an unwatch.
+                Completed = existing.Completed | completedNow,
+                LastPlayed = now,
+                Duration = duration > TimeSpan.Zero ? duration : existing.Duration,
+                LastPosition = position
+            });
 
         await PersistAsync(state);
     }
 
     /// <inheritdoc/>
     public bool IsWatched(string location) =>
-        _cache.TryGetValue(location, out WatchStateDto? state) && state.Completed;
+        _cache.TryGetValue(NormalizeLocation(location), out WatchStateDto? state) && state.Completed;
 
     /// <inheritdoc/>
     public double GetProgress(string location)
     {
-        if (!_cache.TryGetValue(location, out WatchStateDto? state)) return 0d;
+        if (!_cache.TryGetValue(NormalizeLocation(location), out WatchStateDto? state)) return 0d;
         if (state.Completed) return 1d;
         return state.Duration is { } duration
             ? WatchThreshold.Progress(state.LastPosition, duration)
@@ -86,13 +117,27 @@ public sealed class WatchStateService : IWatchStateService
     /// <inheritdoc/>
     public async Task SetWatchedAsync(string location, bool watched)
     {
-        WatchStateDto state = _cache.TryGetValue(location, out WatchStateDto? existing)
-            ? existing
-            : new WatchStateDto { Location = location };
+        string normalized = NormalizeLocation(location);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        state.Completed = watched;
-        state.LastPlayed ??= DateTimeOffset.UtcNow;
-        _cache[location] = state;
+        // Same immutable-update approach as RecordProgressAsync: build a new instance instead
+        // of mutating the cached one in place, so a concurrent update can't be lost.
+        WatchStateDto state = _cache.AddOrUpdate(
+            normalized,
+            _ => new WatchStateDto
+            {
+                Location = normalized,
+                Completed = watched,
+                LastPlayed = now
+            },
+            (_, existing) => new WatchStateDto
+            {
+                Location = normalized,
+                Completed = watched,
+                LastPlayed = existing.LastPlayed ?? now,
+                Duration = existing.Duration,
+                LastPosition = existing.LastPosition
+            });
 
         await PersistAsync(state);
     }

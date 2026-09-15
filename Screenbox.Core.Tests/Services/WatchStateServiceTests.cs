@@ -96,9 +96,12 @@ public sealed class WatchStateServiceTests
 
         IReadOnlyList<WatchStateDto> result = service.GetContinueWatching(10);
 
+        // Location is normalized (case-folded) at the service boundary so the cache and the
+        // case-sensitive watch_state.location column can never disagree about identity — see
+        // WatchStateService.NormalizeLocation. Count, order and filtering are unaffected.
         await Assert.That(result.Count).IsEqualTo(2);
-        await Assert.That(result[0].Location).IsEqualTo(@"D:\newer.mkv");
-        await Assert.That(result[1].Location).IsEqualTo(@"D:\older.mkv");
+        await Assert.That(result[0].Location).IsEqualTo(@"D:\NEWER.MKV");
+        await Assert.That(result[1].Location).IsEqualTo(@"D:\OLDER.MKV");
     }
 
     [Test]
@@ -124,5 +127,33 @@ public sealed class WatchStateServiceTests
 
         await Assert.That(service.IsWatched(@"D:\never-seen.mkv")).IsFalse();
         await Assert.That(service.GetProgress(@"D:\never-seen.mkv")).IsEqualTo(0d);
+    }
+
+    [Test]
+    public async Task IsWatched_IsCaseInsensitiveForLocation()
+    {
+        // watch_state.location is a case-sensitive SQLite TEXT PRIMARY KEY while the in-memory
+        // cache is case-insensitive; the service must normalize so the two never disagree about
+        // whether a path recorded in one casing is the same item queried in another.
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, _) = await CreateAsync(fixture.DirectoryPath);
+
+        await service.RecordProgressAsync(@"D:\Ep6.mkv", TimeSpan.FromMinutes(19), TimeSpan.FromMinutes(20));
+
+        await Assert.That(service.IsWatched(@"d:\ep6.mkv")).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_CaseVariantLocationsProduceExactlyOneRow()
+    {
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, DatabaseService db) = await CreateAsync(fixture.DirectoryPath);
+
+        await service.RecordProgressAsync(@"D:\Ep7.mkv", TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+        await service.RecordProgressAsync(@"d:\EP7.mkv", TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(20));
+
+        List<WatchStateDto> rows = await db.ListWatchStateAsync();
+
+        await Assert.That(rows.Count).IsEqualTo(1);
     }
 }
