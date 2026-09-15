@@ -81,11 +81,16 @@ public sealed partial class WatchStateContext : ObservableObject
             {
                 try
                 {
+                    // Always re-verify the file still resolves, even for a location already in
+                    // the cache: the cache exists to reuse the ViewModel INSTANCE (so a tile
+                    // doesn't reload its thumbnail every refresh), not to skip the existence
+                    // check. Without this, a file deleted after its first successful refresh
+                    // would keep showing a stale, never-re-checked tile forever.
+                    StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(state.Location).ConfigureAwait(false);
+                    if (file == null) continue;
+
                     if (!_mediaByLocation.TryGetValue(state.Location, out MediaViewModel? media))
                     {
-                        StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(state.Location).ConfigureAwait(false);
-                        if (file == null) continue;
-
                         media = _mediaFactory.GetOrCreate(file);
                     }
 

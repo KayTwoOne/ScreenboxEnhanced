@@ -147,6 +147,32 @@ public sealed class WatchStateContextTests
     }
 
     [Test]
+    public async Task RefreshAsync_DropsAnItemWhoseFileIsDeletedAfterBeingCached()
+    {
+        // The instance cache exists purely to hand back the SAME MediaViewModel instance across
+        // refreshes (so a tile doesn't reload its thumbnail every time) - it must never be used
+        // as a shortcut that skips re-checking whether the file still exists. This reproduces
+        // exactly that regression: resolve successfully once (populating the cache), delete the
+        // file, then refresh again and assert the item is dropped from the collection. The
+        // never-existed-file test above does not catch this, because in that test the cache is
+        // never populated in the first place.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        string filePath = Path.Combine(fixture.DirectoryPath, "ep1.mkv");
+        await File.WriteAllTextAsync(filePath, "x");
+        await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+
+        await context.RefreshAsync(25);
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
+
+        File.Delete(filePath);
+        await context.RefreshAsync(25);
+
+        await Assert.That(context.ContinueWatching).IsEmpty();
+    }
+
+    [Test]
     public async Task RefreshAsync_RespectsTheLimit()
     {
         using var fixture = new TestDirectoryFixture();
