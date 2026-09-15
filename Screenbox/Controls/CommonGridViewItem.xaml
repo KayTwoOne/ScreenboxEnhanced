@@ -7,6 +7,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:interactivity="using:Microsoft.Xaml.Interactivity"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:muxc="using:Microsoft.UI.Xaml.Controls"
     d:DesignHeight="300"
     d:DesignWidth="400"
     mc:Ignorable="d">
@@ -74,6 +75,38 @@
             Visibility="{x:Bind CanPlay, Mode=OneWay}">
             <FontIcon FontFamily="{StaticResource ScreenboxSymbolThemeFontFamily}" Glyph="{x:Bind converters:GlyphConverter.ToPlayPauseGlyph(IsPlaying), Mode=OneWay}" />
         </Button>
+
+        <muxc:ProgressBar
+            x:Name="WatchProgressBar"
+            Grid.Row="0"
+            Height="3"
+            Margin="0,0,0,1"
+            VerticalAlignment="Bottom"
+            IsHitTestVisible="False"
+            Maximum="1"
+            Minimum="0"
+            Value="{x:Bind WatchProgress, Mode=OneWay}"
+            Visibility="{x:Bind converters:WatchStateConverter.ShouldShowProgress(IsWatched, WatchProgress), Mode=OneWay}" />
+
+        <Border
+            x:Name="WatchedIcon"
+            Grid.Row="0"
+            Width="24"
+            Height="24"
+            Margin="8"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+            BackgroundSizing="OuterBorderEdge"
+            BorderBrush="{ThemeResource ControlElevationBorderBrush}"
+            BorderThickness="{StaticResource ButtonBorderThemeThickness}"
+            CornerRadius="{StaticResource CircularCornerRadius}"
+            Visibility="{x:Bind IsWatched, Mode=OneWay}">
+            <FontIcon
+                FontSize="12"
+                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                Glyph="&#xE73E;" />
+        </Border>
 
         <!--
             This simulates the maximum amount of vertical space the text can occupy.

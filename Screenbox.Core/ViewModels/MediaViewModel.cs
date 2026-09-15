@@ -87,6 +87,9 @@ public sealed partial class MediaViewModel : ObservableRecipient
     [ObservableProperty]
     public partial bool IsPlaying { get; set; }
 
+    [ObservableProperty] public partial bool IsWatched { get; set; }
+    [ObservableProperty] public partial double WatchProgress { get; set; }
+
     private WeakReference<BitmapImage>? _thumbnailRef;
 
     public MediaViewModel(MediaViewModel source)
@@ -319,6 +322,16 @@ public sealed partial class MediaViewModel : ObservableRecipient
                 DecodePixelHeight = 300
             };
         }
+    }
+
+    /// <summary>
+    /// Refreshes watched state from the in-memory cache. Cheap and synchronous by design:
+    /// this runs per tile as items scroll into view.
+    /// </summary>
+    public void RefreshWatchState(IWatchStateService watchStateService)
+    {
+        IsWatched = watchStateService.IsWatched(Location);
+        WatchProgress = watchStateService.GetProgress(Location);
     }
 
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]

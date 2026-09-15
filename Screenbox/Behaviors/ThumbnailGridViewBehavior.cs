@@ -1,4 +1,6 @@
+using CommunityToolkit.Mvvm.DependencyInjection;
 using Microsoft.Xaml.Interactivity;
+using Screenbox.Core.Services;
 using Screenbox.Core.ViewModels;
 using Windows.UI.Xaml.Controls;
 
@@ -28,12 +30,14 @@ internal sealed partial class ThumbnailGridViewBehavior : Behavior<GridView>
                 break;
             case MediaViewModel media:
                 await media.LoadThumbnailAsync();
+                media.RefreshWatchState(Ioc.Default.GetRequiredService<IWatchStateService>());
                 break;
             case StorageItemViewModel storageItem:
                 await storageItem.UpdateCaptionAsync();
                 if (storageItem.Media != null)
                 {
                     await storageItem.Media.LoadThumbnailAsync();
+                    storageItem.Media.RefreshWatchState(Ioc.Default.GetRequiredService<IWatchStateService>());
                 }
                 await storageItem.LoadArtworkAsync();
                 break;

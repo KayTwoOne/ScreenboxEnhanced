@@ -150,10 +150,12 @@
                         CanPlay="{x:Bind IsFile}"
                         Caption="{x:Bind helpers:ItemLabelHelper.GetStorageItemCaption(IsFile, CaptionText, ItemCount), Mode=OneWay}"
                         IsPlaying="{x:Bind Media.IsPlaying, Mode=OneWay}"
+                        IsWatched="{x:Bind Media.IsWatched, Mode=OneWay}"
                         PlayCommand="{StaticResource MediaListViewItemPlayCommand}"
                         PlayCommandParameter="{x:Bind}"
                         ThumbnailHeight="{StaticResource WideGridViewItemThumbnailHeight}"
-                        ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay, FallbackValue={x:Null}}">
+                        ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay, FallbackValue={x:Null}}"
+                        WatchProgress="{x:Bind Media.WatchProgress, Mode=OneWay}">
                         <controls:CommonGridViewItem.PlaceholderIconSource>
                             <FontIconSource FontSize="{StaticResource WideGridItemPlaceholderIconFontSize}" Glyph="{x:Bind converters:GlyphConverter.ToStorageItemGlyph(StorageItem)}" />
                         </controls:CommonGridViewItem.PlaceholderIconSource>
