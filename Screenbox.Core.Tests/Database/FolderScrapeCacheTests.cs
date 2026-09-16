@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Screenbox.Core.Enums;
 using Screenbox.Core.Models;
@@ -13,6 +14,15 @@ public sealed class FolderScrapeCacheTests
         var db = new DatabaseService(NullLogger<DatabaseService>.Instance) { DbFolderPath = dir };
         await db.InitializeAsync();
         return db;
+    }
+
+    private static long CountScrapeCacheRows(string dir)
+    {
+        using var connection = new SqliteConnection($"Data Source={Path.Combine(dir, "screenbox.db")}");
+        connection.Open();
+        using SqliteCommand cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM folder_scrape_cache;";
+        return (long)(cmd.ExecuteScalar() ?? 0L);
     }
 
     [Test]
@@ -101,6 +111,75 @@ public sealed class FolderScrapeCacheTests
 
         FolderScrapeCacheDto? loaded = await db.LoadScrapeCacheAsync(@"D:\Anime\Gachiakuta");
         await Assert.That(loaded).IsNull();
+    }
+
+    [Test]
+    public async Task LoadScrapeCacheAsync_IsCaseInsensitiveForPath()
+    {
+        // Windows paths are not case-sensitive, but SQLite's default BINARY collation is. Saving
+        // under one casing and loading under another must still hit the same row.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = @"D:\Media\Anime\X",
+            Provider = "anilist",
+            ProviderId = "1",
+            Synopsis = "..."
+        });
+
+        FolderScrapeCacheDto? loaded = await db.LoadScrapeCacheAsync(@"D:\MEDIA\ANIME\X");
+
+        await Assert.That(loaded).IsNotNull()
+            .Because("Folder paths differing only by casing refer to the same folder on Windows.");
+        await Assert.That(loaded!.ProviderId).IsEqualTo("1");
+    }
+
+    [Test]
+    public async Task SaveScrapeCacheAsync_DifferentCasingUpdatesExistingRowRatherThanDuplicating()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Y";
+
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto { Path = path, Synopsis = "Old" });
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto { Path = path.ToUpperInvariant(), Synopsis = "New" });
+
+        await Assert.That(CountScrapeCacheRows(fixture.DirectoryPath)).IsEqualTo(1L)
+            .Because("A save under a different casing is the same physical folder and must update, not duplicate, the row.");
+
+        FolderScrapeCacheDto? loaded = await db.LoadScrapeCacheAsync(path);
+        await Assert.That(loaded!.Synopsis).IsEqualTo("New");
+    }
+
+    [Test]
+    public async Task SaveScrapeCacheAsync_AllNullableFieldsRoundTripAsNull()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\NoMetadata";
+
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = path,
+            Provider = null,
+            ProviderId = null,
+            Synopsis = null,
+            Year = null,
+            ScrapedPoster = null,
+            LastScraped = null
+        });
+
+        FolderScrapeCacheDto? loaded = await db.LoadScrapeCacheAsync(path);
+
+        await Assert.That(loaded).IsNotNull();
+        await Assert.That(loaded!.Provider).IsNull();
+        await Assert.That(loaded.ProviderId).IsNull();
+        await Assert.That(loaded.Synopsis).IsNull();
+        await Assert.That(loaded.Year).IsNull();
+        await Assert.That(loaded.ScrapedPoster).IsNull();
+        await Assert.That(loaded.LastScraped).IsNull();
     }
 
     [Test]

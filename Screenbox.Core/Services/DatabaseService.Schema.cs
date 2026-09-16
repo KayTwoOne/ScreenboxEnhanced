@@ -538,7 +538,11 @@ public sealed partial class DatabaseService
 
     private const string CreateFolderScrapeCacheSql = """
         CREATE TABLE IF NOT EXISTS folder_scrape_cache (
-            path           TEXT    PRIMARY KEY,
+            -- Windows paths are not case-sensitive, but SQLite's default BINARY collation is, so
+            -- lookups need an explicit case-insensitive collation. COLLATE NOCASE only folds ASCII
+            -- casing, which is the right trade-off for filesystem paths (and keeps the stored path
+            -- in its original casing, unlike upper-invariant normalization in C#).
+            path           TEXT    PRIMARY KEY COLLATE NOCASE,
             provider       TEXT,
             provider_id    TEXT,
             synopsis       TEXT,
