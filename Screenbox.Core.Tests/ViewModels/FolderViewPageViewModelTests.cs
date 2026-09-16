@@ -27,7 +27,7 @@ public sealed class FolderViewPageViewModelTests
     /// Builds a real <see cref="FolderViewPageViewModel"/> backed by a real, isolated
     /// <see cref="DatabaseService"/>. <see cref="ApplyFolderEditAsync"/> only touches
     /// the database and artwork services, so the remaining constructor dependencies
-    /// (files/navigation/factory) are never exercised and are safely left null.
+    /// (files/navigation/factory/folder stats) are never exercised and are safely left null.
     /// </summary>
     /// <remarks>
     /// TUnit can resume a test on a different thread than the one <see cref="TestInitializer"/>
@@ -44,7 +44,8 @@ public sealed class FolderViewPageViewModelTests
             navigationService: null!,
             storageVmFactory: null!,
             artworkService: null!,
-            databaseService: databaseService);
+            databaseService: databaseService,
+            folderStatsService: null!);
     }
 
     [Test]

@@ -15,8 +15,9 @@ public sealed partial class FolderListViewPageViewModel : FolderViewPageViewMode
         INavigationService navigationService,
         StorageItemViewModelFactory storageVmFactory,
         IArtworkService artworkService,
-        IDatabaseService databaseService) :
-        base(filesService, navigationService, storageVmFactory, artworkService, databaseService)
+        IDatabaseService databaseService,
+        IFolderStatsService folderStatsService) :
+        base(filesService, navigationService, storageVmFactory, artworkService, databaseService, folderStatsService)
     {
         _navigationService = navigationService;
     }

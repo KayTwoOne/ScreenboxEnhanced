@@ -42,6 +42,7 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private readonly StorageItemViewModelFactory _storageVmFactory;
     private readonly IArtworkService _artworkService;
     private readonly IDatabaseService _databaseService;
+    private readonly IFolderStatsService _folderStatsService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _loadingTimer;
     private readonly List<MediaViewModel> _playableItems = [];
@@ -49,13 +50,15 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private object? _source;
 
     public FolderViewPageViewModel(IFilesService filesService, INavigationService navigationService,
-        StorageItemViewModelFactory storageVmFactory, IArtworkService artworkService, IDatabaseService databaseService)
+        StorageItemViewModelFactory storageVmFactory, IArtworkService artworkService, IDatabaseService databaseService,
+        IFolderStatsService folderStatsService)
     {
         _filesService = filesService;
         _storageVmFactory = storageVmFactory;
         _navigationService = navigationService;
         _artworkService = artworkService;
         _databaseService = databaseService;
+        _folderStatsService = folderStatsService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _loadingTimer = _dispatcherQueue.CreateTimer();
 
@@ -65,6 +68,12 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     public void Receive(RefreshFolderMessage message)
     {
         if (!_isActive) return;
+        // Watch state (and possibly the library itself) may have changed since the cache was
+        // filled, so drop it here, right before the view re-reads its items. The next per-tile
+        // stats request recomputes. This is an accepted limitation: counts refresh when the
+        // folder view refreshes, not the instant an episode crosses the watched threshold
+        // mid-playback.
+        _folderStatsService.Invalidate();
         _dispatcherQueue.TryEnqueue(RefreshFolderContent);
     }
 
