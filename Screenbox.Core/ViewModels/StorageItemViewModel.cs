@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
 using Screenbox.Core.Factories;
+using Screenbox.Core.Helpers;
 using Screenbox.Core.Models;
 using Screenbox.Core.Services;
 using Windows.Storage;
@@ -87,6 +88,13 @@ public sealed partial class StorageItemViewModel : ObservableObject
                     ItemCount = await _filesService.GetSupportedItemCountAsync(folder);
                     break;
                 case StorageFile file:
+                    EpisodeInfo episode = EpisodeInfoParser.Parse(file.Name);
+                    if (episode.Title is { Length: > 0 } episodeTitle)
+                    {
+                        CaptionText = episodeTitle;
+                        break;
+                    }
+
                     if (!string.IsNullOrEmpty(Media?.Caption))
                     {
                         CaptionText = Media?.Caption ?? string.Empty;
