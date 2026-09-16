@@ -252,4 +252,37 @@ public sealed class WatchStateContextTests
         // Should still resolve using the normalized path as a fallback.
         await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
     }
+
+    [Test]
+    public async Task RefreshAsync_LoadsCacheIfNotYetLoaded()
+    {
+        // This test proves that RefreshAsync works correctly even when the service's cache
+        // has not been explicitly loaded beforehand. Previously, if LoadAsync had not been called,
+        // GetContinueWatching would return empty data from the in-memory cache, even though the
+        // database contained valid rows. RefreshAsync should ensure the cache is loaded first,
+        // guaranteeing the refresh works independently of initialization order. This is the
+        // critical path for the Continue Watching row on app startup: HomePageViewModel.OnLoaded
+        // -> RefreshContinueWatchingAsync -> RefreshAsync, without any prior LoadAsync call.
+        using var fixture = new TestDirectoryFixture();
+        var db = new DatabaseService(NullLogger<DatabaseService>.Instance) { DbFolderPath = fixture.DirectoryPath };
+        await db.InitializeAsync();
+
+        // Create a service and seed the database, but DO NOT call LoadAsync yet.
+        var service = new WatchStateService(db, NullLogger<WatchStateService>.Instance);
+
+        // Record watch state with the service (this goes into the database).
+        string filePath = Path.Combine(fixture.DirectoryPath, "unwatched-episode.mkv");
+        await File.WriteAllTextAsync(filePath, "x");
+        await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+
+        // Create context with the service whose cache is still empty (LoadAsync not called).
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+
+        // RefreshAsync should load the cache automatically before querying it.
+        await context.RefreshAsync(25);
+
+        // Should have populated the collection from the database, even without a prior LoadAsync call.
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
+        await Assert.That(context.IsLoaded).IsTrue();
+    }
 }

@@ -75,6 +75,13 @@ public sealed partial class WatchStateContext : ObservableObject
 
         try
         {
+            // Ensure the watch-state cache is loaded from the database before querying it.
+            // LoadAsync is self-guarding: it returns early if already loaded, and does not
+            // permanently latch the cache as empty on transient failures, so it is safe and
+            // cheap to call more than once. This guarantees that GetContinueWatching has data
+            // to work with regardless of what else has or hasn't run.
+            await _watchStateService.LoadAsync();
+
             IReadOnlyList<WatchStateDto> states = _watchStateService.GetContinueWatching(limit);
 
             foreach (WatchStateDto state in states)
