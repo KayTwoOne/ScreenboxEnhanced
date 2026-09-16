@@ -22,11 +22,11 @@ namespace Screenbox.Core.Services;
 /// populated "errors" array rather than a non-2xx status, so success is determined from the
 /// response body, never from the status line alone.
 /// </summary>
-public sealed class AniListMetadataProvider : IMetadataProvider
+public sealed partial class AniListMetadataProvider : IMetadataProvider
 {
     private const string Endpoint = "https://graphql.anilist.co";
 
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
 
     private const string SearchQuery =
         """
@@ -43,26 +43,33 @@ public sealed class AniListMetadataProvider : IMetadataProvider
         }
         """;
 
-    private static readonly Regex HtmlTagRegex = new(
-        "<[^>]*>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    // [GeneratedRegex] rather than RegexOptions.Compiled: this project sets IsAotCompatible,
+    // and Compiled silently falls back to the interpreter under NativeAOT.
+    [GeneratedRegex("<[^>]*>", RegexOptions.CultureInvariant)]
+    private static partial Regex HtmlTagRegex();
 
     private readonly HttpClient _client;
     private readonly ILogger<AniListMetadataProvider> _logger;
+    private readonly TimeSpan _requestTimeout;
 
     /// <inheritdoc />
     public string Name => "anilist";
 
-    public AniListMetadataProvider(HttpClient client, ILogger<AniListMetadataProvider>? logger = null)
+    public AniListMetadataProvider(
+        HttpClient client,
+        ILogger<AniListMetadataProvider>? logger = null,
+        TimeSpan? requestTimeout = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _logger = logger ?? NullLogger<AniListMetadataProvider>.Instance;
+        _requestTimeout = requestTimeout ?? DefaultRequestTimeout;
     }
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<MetadataMatch>> SearchAsync(string query, CancellationToken ct)
     {
         using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(RequestTimeout);
+        timeoutCts.CancelAfter(_requestTimeout);
 
         try
         {
@@ -162,7 +169,7 @@ public sealed class AniListMetadataProvider : IMetadataProvider
             return html;
         }
 
-        string withoutTags = HtmlTagRegex.Replace(html, string.Empty);
+        string withoutTags = HtmlTagRegex().Replace(html, string.Empty);
         return WebUtility.HtmlDecode(withoutTags).Trim();
     }
 }

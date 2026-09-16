@@ -1,3 +1,4 @@
+﻿using System;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -181,6 +182,35 @@ public sealed class AniListMetadataProviderTests
         await Assert.That(handler.LastRequestBody).IsNotNull();
         await Assert.That(handler.LastRequestBody!).Contains("Cowboy Bebop");
         await Assert.That(handler.LastRequestBody!).Contains("ANIME");
+        await Assert.That(handler.CallCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task SearchAsync_InternalRequestTimeoutElapses_ReturnsEmptyListWithoutThrowing()
+    {
+        // Distinct from the caller-cancellation test above: here the CALLER's token
+        // (CancellationToken.None) is never cancelled. Only the provider's own internal
+        // request-timeout budget expires mid-flight, so this must land in the "our own timeout
+        // tripped" branch and be swallowed into an empty list rather than rethrown. Both paths
+        // surface as OperationCanceledException, so without this test only the rethrowing half
+        // was covered. The request actually starts (CallCount reaches 1), unlike the
+        // pre-cancelled-caller case.
+        StubHttpMessageHandler handler = new(async (_, ct) =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{ "data": { "Page": { "media": [] } } }""")
+            };
+        });
+        AniListMetadataProvider provider = new(
+            new HttpClient(handler),
+            requestTimeout: TimeSpan.FromMilliseconds(20));
+
+        IReadOnlyList<MetadataMatch> matches = await provider.SearchAsync("query", CancellationToken.None);
+
+        await Assert.That(matches).IsNotNull();
+        await Assert.That(matches).IsEmpty();
         await Assert.That(handler.CallCount).IsEqualTo(1);
     }
 }
