@@ -126,4 +126,35 @@ public sealed class EpisodeInfoParserTests
         await Assert.That(EpisodeInfoParser.Parse("").Episode).IsNull();
         await Assert.That(EpisodeInfoParser.Parse(".mkv").Episode).IsNull();
     }
+
+    [Test]
+    public async Task Parse_TitleWithHyphenIsPreserved()
+    {
+        // Bug fix: hyphens within episode titles must be preserved.
+        // Previously split on all hyphens and returned the last segment ("minded").
+        EpisodeInfo info = EpisodeInfoParser.Parse("Jujutsu Kaisen - 011 - Narrow-minded.mkv");
+        await Assert.That(info.Episode).IsEqualTo(11);
+        await Assert.That(info.Title).IsEqualTo("Narrow-minded");
+    }
+
+    [Test]
+    public async Task Parse_TitleWithMultipleHyphensAndRomanNumeralsIsPreserved()
+    {
+        // Bug fix: complex titles with hyphens and Roman numerals must be fully extracted.
+        // Previously returned just "II" (the last segment after splitting).
+        EpisodeInfo info = EpisodeInfoParser.Parse("Jujutsu Kaisen - 005 - Curse Womb Must Die -II-.mkv");
+        await Assert.That(info.Episode).IsEqualTo(5);
+        await Assert.That(info.Title).IsEqualTo("Curse Womb Must Die -II-");
+    }
+
+    [Test]
+    public async Task Parse_TrailingNumericSuffixIsKeptAsPartOfTitle()
+    {
+        // After fixing hyphen handling, trailing numeric suffixes like "-2" are kept
+        // as part of the title rather than treated as version markers.
+        // This maintains consistency: hyphens in titles are preserved.
+        EpisodeInfo info = EpisodeInfoParser.Parse("Jujutsu Kaisen - 023 - The Origin of Blind Obedience -2.mkv");
+        await Assert.That(info.Episode).IsEqualTo(23);
+        await Assert.That(info.Title).IsEqualTo("The Origin of Blind Obedience -2");
+    }
 }

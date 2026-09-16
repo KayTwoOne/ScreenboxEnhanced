@@ -127,10 +127,35 @@ public static partial class EpisodeInfoParser
 
     private static string? ExtractTitle(string name)
     {
-        // "Jujutsu Kaisen - 001 - Ryoumen Sukuna" carries a title in the third segment.
-        string[] parts = name.Split('-', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length < 3) return null;
-        string candidate = parts[^1];
-        return candidate.Length > 0 && !candidate.All(char.IsDigit) ? candidate : null;
+        // Extract title from everything after the episode number.
+        // "Jujutsu Kaisen - 001 - Ryoumen Sukuna" → "Ryoumen Sukuna"
+        // "Jujutsu Kaisen - 011 - Narrow-minded" → "Narrow-minded" (not "minded")
+        // "Jujutsu Kaisen - 005 - Curse Womb Must Die -II-" → "Curse Womb Must Die -II-"
+
+        Match sep = SeparatedEpisodeRegex().Match(name);
+        if (!sep.Success) return null;
+
+        // Everything after the episode number (and optional version)
+        int afterEpisode = sep.Groups[0].Index + sep.Groups[0].Length;
+        if (afterEpisode >= name.Length) return null;
+
+        string titleCandidate = name[afterEpisode..].Trim();
+
+        // Remove leading title separator hyphen (e.g., " - Narrow-minded" → "Narrow-minded")
+        while (titleCandidate.StartsWith("-"))
+        {
+            titleCandidate = titleCandidate[1..].Trim();
+        }
+
+        if (titleCandidate.Length == 0)
+            return null;
+
+        // Reject if it's only digits, hyphens, and whitespace—no actual text content.
+        // This filters out pure disambiguators like "-2" while preserving real titles
+        // that contain hyphens, digits, or Roman numerals.
+        if (titleCandidate.All(c => char.IsDigit(c) || c == '-' || char.IsWhiteSpace(c)))
+            return null;
+
+        return titleCandidate;
     }
 }
