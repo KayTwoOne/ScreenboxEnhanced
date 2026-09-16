@@ -79,6 +79,22 @@ public interface IDatabaseService
     /// <summary>Removes folder metadata.</summary>
     Task DeleteFolderMetadataAsync(string path);
 
+    /// <summary>
+    /// Saves disposable, refetchable online-metadata cache for a single folder, replacing the whole
+    /// row. Unlike <see cref="SaveFolderMetadataAsync"/>, nothing here is user-authored, so the
+    /// backing table is dropped and recreated on schema drift rather than migrated in place.
+    /// </summary>
+    Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache);
+
+    /// <summary>Loads a folder's scrape cache entry, or null when the folder has none.</summary>
+    Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path);
+
+    /// <summary>
+    /// Empties the entire scrape cache table. This never touches <c>folder_metadata</c>, which holds
+    /// the durable, user-authored data (custom titles, manual posters) that a scrape must not clobber.
+    /// </summary>
+    Task ClearScrapeCacheAsync();
+
     /// <summary>Saves durable watched state for a media location.</summary>
     Task SaveWatchStateAsync(WatchStateDto state);
 

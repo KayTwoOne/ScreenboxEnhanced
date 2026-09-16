@@ -147,6 +147,9 @@ public sealed class FolderStatsServiceTests
         public Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source) => throw new NotSupportedException();
         public Task SetFolderCustomTitleAsync(string path, string? customTitle) => throw new NotSupportedException();
         public Task DeleteFolderMetadataAsync(string path) => throw new NotSupportedException();
+        public Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache) => throw new NotSupportedException();
+        public Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path) => throw new NotSupportedException();
+        public Task ClearScrapeCacheAsync() => throw new NotSupportedException();
         public Task SaveWatchStateAsync(WatchStateDto state) => throw new NotSupportedException();
         public Task<WatchStateDto?> LoadWatchStateAsync(string location) => throw new NotSupportedException();
         public Task<List<WatchStateDto>> ListWatchStateAsync() => throw new NotSupportedException();
@@ -182,6 +185,9 @@ public sealed class FolderStatsServiceTests
         public Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source) => throw new NotSupportedException();
         public Task SetFolderCustomTitleAsync(string path, string? customTitle) => throw new NotSupportedException();
         public Task DeleteFolderMetadataAsync(string path) => throw new NotSupportedException();
+        public Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache) => throw new NotSupportedException();
+        public Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path) => throw new NotSupportedException();
+        public Task ClearScrapeCacheAsync() => throw new NotSupportedException();
         public Task SaveWatchStateAsync(WatchStateDto state) => throw new NotSupportedException();
         public Task<WatchStateDto?> LoadWatchStateAsync(string location) => throw new NotSupportedException();
         public Task<List<WatchStateDto>> ListWatchStateAsync() => throw new NotSupportedException();

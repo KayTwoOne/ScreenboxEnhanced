@@ -64,6 +64,8 @@ public sealed partial class DatabaseService
             "artist", "album", "album_artist", "composers", "genre", "track_number", "bitrate",
             "subtitle", "producers", "writers", "width", "height", "video_bitrate");
         EnsureReplaceableTable(connection, "playback_progress", CreatePlaybackProgressSql, "location", "position_ticks");
+        EnsureReplaceableTable(connection, "folder_scrape_cache", CreateFolderScrapeCacheSql,
+            "path", "provider", "provider_id", "synopsis", "year", "scraped_poster", "last_scraped");
         EnsurePlaylistsTable(connection);
         EnsurePlaylistItemsTable(connection);
         EnsureFolderMetadataTable(connection);
@@ -100,6 +102,7 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreateLibraryFoldersSql);
         ExecuteNonQuery(connection, CreateMediaRecordsSql);
         ExecuteNonQuery(connection, CreatePlaybackProgressSql);
+        ExecuteNonQuery(connection, CreateFolderScrapeCacheSql);
         ExecuteNonQuery(connection, CreatePlaylistsSql);
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
         ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
@@ -530,6 +533,18 @@ public sealed partial class DatabaseService
         CREATE TABLE IF NOT EXISTS playback_progress (
             location      TEXT    PRIMARY KEY,
             position_ticks INTEGER NOT NULL
+        );
+        """;
+
+    private const string CreateFolderScrapeCacheSql = """
+        CREATE TABLE IF NOT EXISTS folder_scrape_cache (
+            path           TEXT    PRIMARY KEY,
+            provider       TEXT,
+            provider_id    TEXT,
+            synopsis       TEXT,
+            year           INTEGER,
+            scraped_poster TEXT,
+            last_scraped   INTEGER
         );
         """;
 
