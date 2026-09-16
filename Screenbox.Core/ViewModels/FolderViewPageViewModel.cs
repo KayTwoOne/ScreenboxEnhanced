@@ -262,12 +262,22 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
         // Rebuild: folders first, then sorted files
         List<StorageItemViewModel> ordered = [..folders, ..files];
 
-        // Only rebuild if order actually changed
+        // Only rebuild Items if order actually changed
         if (!ordered.SequenceEqual(Items))
         {
             Items.Clear();
             foreach (StorageItemViewModel item in ordered)
                 Items.Add(item);
+        }
+
+        // Always rebuild _playableItems from the sorted order to match Items.
+        // This ensures the queue follows the same ordering as the UI, so when a user
+        // finishes playing one episode, the next one in the queue is the next one on screen.
+        _playableItems.Clear();
+        foreach (StorageItemViewModel item in ordered)
+        {
+            if (item.Media != null)
+                _playableItems.Add(item.Media);
         }
 
         _loadingTimer.Stop();
