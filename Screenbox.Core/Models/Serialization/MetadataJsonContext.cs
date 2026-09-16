@@ -11,6 +11,8 @@ namespace Screenbox.Core.Models.Serialization;
 [JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(AniListRequest))]
 [JsonSerializable(typeof(AniListResponse))]
+[JsonSerializable(typeof(JikanResponse))]
+[JsonSerializable(typeof(TmdbSearchResponse))]
 public sealed partial class MetadataJsonContext : JsonSerializerContext
 {
 }
