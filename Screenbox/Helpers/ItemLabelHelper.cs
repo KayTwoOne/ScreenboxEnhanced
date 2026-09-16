@@ -156,32 +156,21 @@ public static class ItemLabelHelper
     }
 
     /// <summary>
-    /// Gets a caption describing a storage item based on whether it is a file or folder.
-    /// </summary>
-    /// <param name="isFile"><see langword="true"/> if the item is a file; otherwise <see langword="false"/>.</param>
-    /// <param name="fileInfo">The file information string.</param>
-    /// <param name="itemCount">The number of items contained in the folder.</param>
-    /// <returns><paramref name="fileInfo"/> if the item is a file; otherwise a localized item count caption.</returns>
-    public static string GetStorageItemCaption(bool isFile, string fileInfo, uint itemCount)
-    {
-        return isFile ? fileInfo : Strings.Resources.ItemsCount(itemCount);
-    }
-
-    /// <summary>
     /// Gets a caption describing a storage item based on whether it is a file or folder,
     /// preferring aggregate folder statistics over the plain item count when available.
     /// </summary>
     /// <param name="isFile"><see langword="true"/> if the item is a file; otherwise <see langword="false"/>.</param>
     /// <param name="fileInfo">The file information string.</param>
     /// <param name="itemCount">The number of items contained in the folder.</param>
-    /// <param name="stats">Aggregate folder statistics, or <see langword="null"/> if not yet loaded.</param>
+    /// <param name="stats">
+    /// Aggregate folder statistics, or <see langword="null"/> if not yet loaded or not applicable.
+    /// </param>
     /// <returns>
     /// <paramref name="fileInfo"/> if the item is a file; otherwise a caption built from
     /// <paramref name="stats"/>, falling back to a localized item count caption when
-    /// <paramref name="stats"/> is unavailable. The file-caption path is unchanged from
-    /// <see cref="GetStorageItemCaption(bool,string,uint)"/>.
+    /// <paramref name="stats"/> is unavailable.
     /// </returns>
-    public static string GetStorageItemCaption(bool isFile, string fileInfo, uint itemCount, FolderStats? stats)
+    public static string GetStorageItemCaption(bool isFile, string fileInfo, uint itemCount, FolderStats? stats = null)
     {
         return isFile ? fileInfo : GetFolderStatsCaption(itemCount, stats);
     }

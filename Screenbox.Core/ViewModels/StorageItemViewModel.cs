@@ -45,6 +45,7 @@ public sealed partial class StorageItemViewModel : ObservableObject
     private readonly IDatabaseService _databaseService;
     private readonly IFolderStatsService _folderStatsService;
     private bool _folderArtworkLoaded;
+    private bool _folderStatsLoaded;
 
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]
     public StorageItemViewModel(IFilesService filesService,
@@ -198,9 +199,18 @@ public sealed partial class StorageItemViewModel : ObservableObject
     {
         if (StorageItem is not StorageFolder folder || string.IsNullOrEmpty(folder.Path)) return;
 
+        // Container realization fires on every scroll-back. Same early-out as LoadArtworkAsync,
+        // widened to a flag so a folder whose stats resolved to nothing is not re-resolved either.
+        // This does not defeat IFolderStatsService.Invalidate(): every invalidation (see
+        // FolderViewPageViewModel.Receive(RefreshFolderMessage)) is paired with a full items
+        // rebuild that hands out brand-new StorageItemViewModel instances, so no instance keeps
+        // this flag latched true across an invalidation - there is nothing to force-refresh here.
+        if (_folderStatsLoaded) return;
+
         try
         {
             Stats = await _folderStatsService.GetAsync(folder.Path);
+            _folderStatsLoaded = true;
         }
         catch (Exception e)
         {
