@@ -40,6 +40,7 @@ internal sealed partial class ThumbnailGridViewBehavior : Behavior<GridView>
                     storageItem.Media.RefreshWatchState(Ioc.Default.GetRequiredService<IWatchStateService>());
                 }
                 await storageItem.LoadArtworkAsync();
+                await storageItem.LoadFolderStatsAsync();
                 break;
         }
     }

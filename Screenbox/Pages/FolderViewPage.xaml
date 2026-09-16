@@ -148,7 +148,7 @@
                         Width="{StaticResource WideGridViewItemWidth}"
                         AutomationProperties.Name="{x:Bind helpers:ItemLabelHelper.FormatAccessibleStorageItemName(IsFile, Name, CaptionText, ItemCount), Mode=OneWay}"
                         CanPlay="{x:Bind IsFile}"
-                        Caption="{x:Bind helpers:ItemLabelHelper.GetStorageItemCaption(IsFile, CaptionText, ItemCount), Mode=OneWay}"
+                        Caption="{x:Bind helpers:ItemLabelHelper.GetStorageItemCaption(IsFile, CaptionText, ItemCount, Stats), Mode=OneWay}"
                         IsPlaying="{x:Bind Media.IsPlaying, Mode=OneWay}"
                         IsWatched="{x:Bind Media.IsWatched, Mode=OneWay}"
                         PlayCommand="{StaticResource MediaListViewItemPlayCommand}"

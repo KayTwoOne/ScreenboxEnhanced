@@ -282,6 +282,22 @@
   <data name="ItemsCount_None" xml:space="preserve">
     <value>Empty</value>
   </data>
+  <data name="EpisodesCount_One" xml:space="preserve">
+    <value>{0} episode</value>
+    <comment>#Format[Plural Int]</comment>
+  </data>
+  <data name="EpisodesCount_Other" xml:space="preserve">
+    <value>{0} episodes</value>
+    <comment>#Format[Plural Int]</comment>
+  </data>
+  <data name="UnwatchedCount_One" xml:space="preserve">
+    <value>{0} unwatched</value>
+    <comment>#Format[Plural Int]</comment>
+  </data>
+  <data name="UnwatchedCount_Other" xml:space="preserve">
+    <value>{0} unwatched</value>
+    <comment>#Format[Plural Int]</comment>
+  </data>
   <data name="RestoreView" xml:space="preserve">
     <value>Restore immersive view</value>
   </data>

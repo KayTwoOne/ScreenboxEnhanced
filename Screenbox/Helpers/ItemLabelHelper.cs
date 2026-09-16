@@ -1,6 +1,7 @@
 using System;
 using Screenbox.Core;
 using Screenbox.Core.Enums;
+using Screenbox.Core.Models;
 
 namespace Screenbox.Helpers;
 
@@ -164,6 +165,46 @@ public static class ItemLabelHelper
     public static string GetStorageItemCaption(bool isFile, string fileInfo, uint itemCount)
     {
         return isFile ? fileInfo : Strings.Resources.ItemsCount(itemCount);
+    }
+
+    /// <summary>
+    /// Gets a caption describing a storage item based on whether it is a file or folder,
+    /// preferring aggregate folder statistics over the plain item count when available.
+    /// </summary>
+    /// <param name="isFile"><see langword="true"/> if the item is a file; otherwise <see langword="false"/>.</param>
+    /// <param name="fileInfo">The file information string.</param>
+    /// <param name="itemCount">The number of items contained in the folder.</param>
+    /// <param name="stats">Aggregate folder statistics, or <see langword="null"/> if not yet loaded.</param>
+    /// <returns>
+    /// <paramref name="fileInfo"/> if the item is a file; otherwise a caption built from
+    /// <paramref name="stats"/>, falling back to a localized item count caption when
+    /// <paramref name="stats"/> is unavailable. The file-caption path is unchanged from
+    /// <see cref="GetStorageItemCaption(bool,string,uint)"/>.
+    /// </returns>
+    public static string GetStorageItemCaption(bool isFile, string fileInfo, uint itemCount, FolderStats? stats)
+    {
+        return isFile ? fileInfo : GetFolderStatsCaption(itemCount, stats);
+    }
+
+    /// <summary>
+    /// Builds a folder caption from aggregate statistics, falling back to the plain item
+    /// count when statistics are not available yet.
+    /// </summary>
+    /// <param name="itemCount">The number of items contained in the folder.</param>
+    /// <param name="stats">Aggregate folder statistics, or <see langword="null"/> if not yet loaded.</param>
+    /// <returns>
+    /// A caption combining episode count, runtime, and unwatched count when <paramref name="stats"/>
+    /// has a positive episode count; otherwise the localized plain item count caption.
+    /// </returns>
+    public static string GetFolderStatsCaption(uint itemCount, FolderStats? stats)
+    {
+        if (stats is not { EpisodeCount: > 0 } s) return Strings.Resources.ItemsCount(itemCount);
+
+        string episodes = Strings.Resources.EpisodesCount(s.EpisodeCount);
+        string runtime = Humanizer.ToDuration(s.TotalDuration);
+        return s.UnwatchedCount > 0
+            ? $"{episodes} · {runtime} · {Strings.Resources.UnwatchedCount(s.UnwatchedCount)}"
+            : $"{episodes} · {runtime}";
     }
 
     /// <summary>

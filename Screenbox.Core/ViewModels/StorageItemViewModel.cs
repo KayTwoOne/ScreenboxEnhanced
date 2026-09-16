@@ -37,11 +37,13 @@ public sealed partial class StorageItemViewModel : ObservableObject
     [ObservableProperty] public partial uint ItemCount { get; set; }
     [ObservableProperty] public partial BitmapImage? Thumbnail { get; set; }
     [ObservableProperty] public partial string DisplayName { get; set; }
+    [ObservableProperty] public partial FolderStats? Stats { get; set; }
 
     private readonly IFilesService _filesService;
     private readonly ILogger<StorageItemViewModel> _logger;
     private readonly IArtworkService _artworkService;
     private readonly IDatabaseService _databaseService;
+    private readonly IFolderStatsService _folderStatsService;
     private bool _folderArtworkLoaded;
 
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]
@@ -50,12 +52,14 @@ public sealed partial class StorageItemViewModel : ObservableObject
         ILogger<StorageItemViewModel> logger,
         IStorageItem storageItem,
         IArtworkService artworkService,
-        IDatabaseService databaseService)
+        IDatabaseService databaseService,
+        IFolderStatsService folderStatsService)
     {
         _filesService = filesService;
         _logger = logger;
         _artworkService = artworkService;
         _databaseService = databaseService;
+        _folderStatsService = folderStatsService;
         StorageItem = storageItem;
         CaptionText = string.Empty;
         DateCreated = storageItem.DateCreated;
@@ -182,6 +186,25 @@ public sealed partial class StorageItemViewModel : ObservableObject
         catch (Exception e)
         {
             _logger.LogError(e, "Failed to load folder artwork for '{Path}'.", Path);
+        }
+    }
+
+    /// <summary>
+    /// Loads aggregate statistics (episode count, total duration, unwatched count) for this
+    /// item. No-op for files; the caption for files comes from <see cref="UpdateCaptionAsync"/>.
+    /// </summary>
+    [DynamicWindowsRuntimeCast(typeof(StorageFolder))]
+    public async Task LoadFolderStatsAsync()
+    {
+        if (StorageItem is not StorageFolder folder || string.IsNullOrEmpty(folder.Path)) return;
+
+        try
+        {
+            Stats = await _folderStatsService.GetAsync(folder.Path);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to load folder stats for '{Path}'.", Path);
         }
     }
 
