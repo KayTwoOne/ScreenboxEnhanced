@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -132,8 +132,7 @@ public sealed class AniListMetadataProvider : IMetadataProvider
                     title!,
                     StripHtml(item.Description),
                     item.StartDate?.Year,
-                    item.CoverImage?.Large,
-                    1.0));
+                    item.CoverImage?.Large));
             }
 
             return matches;

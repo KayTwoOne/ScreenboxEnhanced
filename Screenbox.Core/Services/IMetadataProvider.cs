@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Screenbox.Core.Models;
@@ -15,8 +15,18 @@ public interface IMetadataProvider
     string Name { get; }
 
     /// <summary>
-    /// Searches the provider for candidates matching <paramref name="query"/>. Returns an
-    /// empty list when nothing matches - never throws for a plain no-match result.
+    /// Searches the provider for candidates matching <paramref name="query"/>.
     /// </summary>
+    /// <remarks>
+    /// Implementations MUST return an empty list when nothing matches, and MUST NOT return
+    /// <see langword="null"/> - callers iterate the result without a null check. They must also
+    /// swallow their own failures: a transport error, a non-success status, a malformed body or a
+    /// provider-level error response all yield an empty list rather than an exception, so one dead
+    /// catalog cannot abort a scan across the others. Only cancellation propagates.
+    /// <para>
+    /// Implementations leave <see cref="MetadataMatch.Confidence"/> at its default of 0; scoring
+    /// belongs to the coordinator, which ranks candidates across providers on one common measure.
+    /// </para>
+    /// </remarks>
     Task<IReadOnlyList<MetadataMatch>> SearchAsync(string query, CancellationToken ct);
 }
