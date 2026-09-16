@@ -245,6 +245,31 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
             }
         }
 
+        // Separate folders (keep in original order) and files (sort by episode)
+        List<StorageItemViewModel> folders = [];
+        List<StorageItemViewModel> files = [];
+        foreach (StorageItemViewModel item in Items)
+        {
+            if (item.IsFile)
+                files.Add(item);
+            else
+                folders.Add(item);
+        }
+
+        // Sort files using EpisodeComparer
+        files.Sort((a, b) => EpisodeComparer.Instance.Compare(a.Name, b.Name));
+
+        // Rebuild: folders first, then sorted files
+        List<StorageItemViewModel> ordered = [..folders, ..files];
+
+        // Only rebuild if order actually changed
+        if (!ordered.SequenceEqual(Items))
+        {
+            Items.Clear();
+            foreach (StorageItemViewModel item in ordered)
+                Items.Add(item);
+        }
+
         _loadingTimer.Stop();
         IsLoading = false;
         IsEmpty = Items.Count == 0;
