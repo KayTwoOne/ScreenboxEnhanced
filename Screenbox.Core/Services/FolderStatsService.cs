@@ -25,6 +25,12 @@ public sealed class FolderStatsService : IFolderStatsService
     /// <inheritdoc/>
     public async Task<FolderStats> GetAsync(string folderPath)
     {
+        // Check the cache first so a hit never re-queries the database, and so Invalidate() is
+        // actually observable through this method rather than only through TryGetCached: without
+        // this check GetAsync would always recompute, and callers who don't happen to call
+        // TryGetCached themselves would get none of the benefit the cache exists to provide.
+        if (_cache.TryGetValue(folderPath, out FolderStats cached)) return cached;
+
         try
         {
             FolderStats stats = await _databaseService.GetFolderStatsAsync(folderPath);
