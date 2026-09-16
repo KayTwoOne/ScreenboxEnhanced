@@ -9,7 +9,7 @@ namespace Screenbox.Core.Models;
 /// </summary>
 public sealed class WatchStateDto
 {
-    /// <summary>Media location. Primary key.</summary>
+    /// <summary>Media location. Primary key. Upper-invariant normalized for cache/database identity.</summary>
     public string Location { get; set; } = string.Empty;
 
     /// <summary>Whether playback passed the completion threshold.</summary>
@@ -27,4 +27,13 @@ public sealed class WatchStateDto
     /// items, so progress bars would vanish from older episodes.
     /// </summary>
     public TimeSpan LastPosition { get; set; }
+
+    /// <summary>
+    /// Original (un-normalized) media location, used for file resolution.
+    /// Null for rows written before this column was added. StorageFile.GetFileFromPathAsync
+    /// is case-sensitive and respects UWP's granted scopes, so the uppercase normalized
+    /// Location can fail to resolve even when the file exists. OriginalLocation preserves
+    /// the casing as received from the app, allowing successful resolution.
+    /// </summary>
+    public string? OriginalLocation { get; set; }
 }

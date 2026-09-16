@@ -191,4 +191,65 @@ public sealed class WatchStateContextTests
 
         await Assert.That(context.ContinueWatching.Count).IsEqualTo(3);
     }
+
+    [Test]
+    public async Task RefreshAsync_ResolvesFileUsingOriginalCasedPathWhenAvailable()
+    {
+        // Regression test for: https://github.com/screenbastard/Screenbox/issues/XXX
+        // WatchStateService normalizes paths to uppercase for cache/database key identity.
+        // StorageFile.GetFileFromPathAsync is case-sensitive and respects UWP's granted scopes,
+        // so an uppercase path fails to resolve even if the file exists under the original casing.
+        // RefreshAsync must use the original (un-normalized) path for file resolution.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        string filePath = Path.Combine(fixture.DirectoryPath, "Episode 1.mkv");
+        await File.WriteAllTextAsync(filePath, "fake media bytes");
+
+        // Record progress with the original-cased path.
+        await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        await context.RefreshAsync(25);
+
+        // Should resolve successfully using the original casing.
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
+        await Assert.That(context.ContinueWatching[0].Name).IsEqualTo("Episode 1.mkv");
+    }
+
+    [Test]
+    public async Task RefreshAsync_FallsBackToNormalizedPathForPreExistingRows()
+    {
+        // Pre-existing rows written before the original_location column was added will have
+        // OriginalLocation = null. RefreshAsync must still resolve them using the normalized
+        // (uppercase) path when original is unavailable.
+        // This simulates loading a database created by an older version.
+        using var fixture = new TestDirectoryFixture();
+        var db = new DatabaseService(NullLogger<DatabaseService>.Instance) { DbFolderPath = fixture.DirectoryPath };
+        await db.InitializeAsync();
+
+        // Manually write a row with no original_location to simulate an old database.
+        // We use a file that actually exists, but we'll have to work with the uppercase path.
+        string filePath = Path.Combine(fixture.DirectoryPath, "old-episode.mkv");
+        await File.WriteAllTextAsync(filePath, "x");
+
+        // Save it with the uppercase path directly to the database (bypassing the service).
+        var uppercase = filePath.ToUpperInvariant();
+        await db.SaveWatchStateAsync(new WatchStateDto
+        {
+            Location = uppercase,
+            Completed = false,
+            LastPlayed = DateTimeOffset.UtcNow,
+            LastPosition = TimeSpan.FromMinutes(5),
+            Duration = TimeSpan.FromMinutes(20)
+        });
+
+        var service = new WatchStateService(db, NullLogger<WatchStateService>.Instance);
+        await service.LoadAsync();
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+
+        await context.RefreshAsync(25);
+
+        // Should still resolve using the normalized path as a fallback.
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
+    }
 }

@@ -575,7 +575,8 @@ public sealed partial class DatabaseService
             completed           INTEGER NOT NULL DEFAULT 0,
             last_played         INTEGER,
             duration_ticks      INTEGER,
-            last_position_ticks INTEGER NOT NULL DEFAULT 0
+            last_position_ticks INTEGER NOT NULL DEFAULT 0,
+            original_location   TEXT
         );
         """;
 
@@ -590,6 +591,7 @@ public sealed partial class DatabaseService
         ("completed", "INTEGER NOT NULL DEFAULT 0"),
         ("last_played", "INTEGER"),
         ("duration_ticks", "INTEGER"),
-        ("last_position_ticks", "INTEGER NOT NULL DEFAULT 0")
+        ("last_position_ticks", "INTEGER NOT NULL DEFAULT 0"),
+        ("original_location", "TEXT")
     ];
 }

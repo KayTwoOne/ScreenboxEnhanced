@@ -118,4 +118,48 @@ public sealed class WatchStateTests
 
         await Assert.That(await db.LoadWatchStateAsync(loc)).IsNull();
     }
+
+    [Test]
+    public async Task SaveAndLoadWatchStateAsync_RoundTripsOriginalLocation()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string normalized = @"D:\MEDIA\ANIME\SERIES\EPISODE.MKV";
+        const string original = @"D:\Media\Anime\Series\Episode.mkv";
+
+        await db.SaveWatchStateAsync(new WatchStateDto
+        {
+            Location = normalized,
+            OriginalLocation = original,
+            Completed = false,
+            LastPlayed = DateTimeOffset.UtcNow,
+            Duration = TimeSpan.FromMinutes(23),
+            LastPosition = TimeSpan.FromMinutes(5)
+        });
+
+        WatchStateDto? loaded = await db.LoadWatchStateAsync(normalized);
+
+        await Assert.That(loaded).IsNotNull();
+        await Assert.That(loaded!.OriginalLocation).IsEqualTo(original);
+    }
+
+    [Test]
+    public async Task SaveAndLoadWatchStateAsync_HandlesNullOriginalLocation()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string loc = @"D:\ep.mkv";
+
+        await db.SaveWatchStateAsync(new WatchStateDto
+        {
+            Location = loc,
+            OriginalLocation = null,
+            Completed = true
+        });
+
+        WatchStateDto? loaded = await db.LoadWatchStateAsync(loc);
+
+        await Assert.That(loaded).IsNotNull();
+        await Assert.That(loaded!.OriginalLocation).IsNull();
+    }
 }

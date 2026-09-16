@@ -86,7 +86,14 @@ public sealed partial class WatchStateContext : ObservableObject
                     // doesn't reload its thumbnail every refresh), not to skip the existence
                     // check. Without this, a file deleted after its first successful refresh
                     // would keep showing a stale, never-re-checked tile forever.
-                    StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(state.Location).ConfigureAwait(false);
+                    // Use the original (un-normalized) location for file resolution, since
+                    // StorageFile.GetFileFromPathAsync is case-sensitive and respects UWP's
+                    // granted scopes. Locations are normalized to uppercase for the cache/database
+                    // key, but the uppercase path may fail even when the file exists under its
+                    // original casing. Fall back to the normalized location for rows written
+                    // before the original_location column was added.
+                    string pathForResolution = state.OriginalLocation ?? state.Location;
+                    StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(pathForResolution).ConfigureAwait(false);
                     if (file == null) continue;
 
                     if (!_mediaByLocation.TryGetValue(state.Location, out MediaViewModel? media))

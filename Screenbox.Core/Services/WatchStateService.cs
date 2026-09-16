@@ -90,6 +90,7 @@ public sealed class WatchStateService : IWatchStateService
             _ => new WatchStateDto
             {
                 Location = normalized,
+                OriginalLocation = location,
                 // Watched never regresses; there is no prior state to OR against here.
                 Completed = completedNow,
                 LastPlayed = now,
@@ -99,6 +100,7 @@ public sealed class WatchStateService : IWatchStateService
             (_, existing) => new WatchStateDto
             {
                 Location = normalized,
+                OriginalLocation = location,
                 // Watched never regresses. Restarting a finished episode is a rewatch, not an unwatch.
                 Completed = existing.Completed | completedNow,
                 LastPlayed = now,
@@ -144,12 +146,14 @@ public sealed class WatchStateService : IWatchStateService
             _ => new WatchStateDto
             {
                 Location = normalized,
+                OriginalLocation = location,
                 Completed = watched,
                 LastPlayed = now
             },
             (_, existing) => new WatchStateDto
             {
                 Location = normalized,
+                OriginalLocation = location,
                 Completed = watched,
                 LastPlayed = existing.LastPlayed ?? now,
                 Duration = existing.Duration,
