@@ -90,4 +90,7 @@ public interface IDatabaseService
 
     /// <summary>Removes watched state for a location.</summary>
     Task DeleteWatchStateAsync(string location);
+
+    /// <summary>Returns aggregate media statistics for a library folder.</summary>
+    Task<FolderStats> GetFolderStatsAsync(string folderPath);
 }
