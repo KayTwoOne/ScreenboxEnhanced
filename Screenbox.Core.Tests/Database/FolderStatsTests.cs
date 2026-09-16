@@ -88,17 +88,41 @@ public sealed class FolderStatsTests
     [Test]
     public async Task GetFolderStatsAsync_DoesNotMatchSiblingFolderWithSharedPrefix()
     {
-        // "Dan Da Dan" must not absorb rows from "Dandadan 2nd Season".
+        // "Attack On Titan" is a true string prefix of "Attack On Titan Abridged", so without the
+        // trailing-separator append, "Attack On Titan%" would match both folders. This is the pair
+        // that actually exercises the trailing-separator logic (unlike "Dan Da Dan" vs "Dandadan 2nd
+        // Season", which diverge at the 4th character and never collide as a LIKE prefix regardless
+        // of the trailing separator).
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
 
         await db.SaveVideoCacheAsync([@"D:\Anime"],
         [
-            Video(@"D:\Anime\Dan Da Dan\ep1.mkv", TimeSpan.FromMinutes(24)),
-            Video(@"D:\Anime\Dandadan 2nd Season\ep1.mkv", TimeSpan.FromMinutes(24))
+            Video(@"D:\Anime\Attack On Titan\ep1.mkv", TimeSpan.FromMinutes(24)),
+            Video(@"D:\Anime\Attack On Titan Abridged\ep1.mkv", TimeSpan.FromMinutes(24))
         ]);
 
-        FolderStats stats = await db.GetFolderStatsAsync(@"D:\Anime\Dan Da Dan");
+        FolderStats stats = await db.GetFolderStatsAsync(@"D:\Anime\Attack On Titan");
+
+        await Assert.That(stats.EpisodeCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task GetFolderStatsAsync_UnderscoreInFolderNameIsNotAWildcard()
+    {
+        // "_" is a single-character LIKE wildcard when unescaped, which would let "Season_1" match
+        // the unrelated sibling "Season-1". This pins down the EscapeLike behavior the brief called
+        // out explicitly.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+
+        await db.SaveVideoCacheAsync([@"D:\Anime"],
+        [
+            Video(@"D:\Anime\Show\Season_1\ep1.mkv", TimeSpan.FromMinutes(24)),
+            Video(@"D:\Anime\Show\Season-1\ep1.mkv", TimeSpan.FromMinutes(24))
+        ]);
+
+        FolderStats stats = await db.GetFolderStatsAsync(@"D:\Anime\Show\Season_1");
 
         await Assert.That(stats.EpisodeCount).IsEqualTo(1);
     }
@@ -135,8 +159,13 @@ public sealed class FolderStatsTests
     }
 
     [Test]
-    public async Task GetFolderStatsAsync_TreatsNullDurationAsZeroRatherThanThrowing()
+    public async Task GetFolderStatsAsync_ZeroDurationRecordDoesNotThrow()
     {
+        // VideoCacheRecordDto.Duration is a non-nullable TimeSpan, so SaveVideoCacheAsync always
+        // writes a concrete tick value (0 here), never a SQL NULL, through the public API. This test
+        // covers the zero-duration case reachable from that API; it does not exercise a NULL
+        // duration_ticks column (COALESCE covers that defensively, but nothing in this suite can
+        // produce it without writing raw SQL).
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
 

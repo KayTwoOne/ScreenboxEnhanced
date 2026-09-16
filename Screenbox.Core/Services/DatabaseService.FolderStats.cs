@@ -17,7 +17,9 @@ public sealed partial class DatabaseService
         using var connection = CreateConnection();
         using var cmd = connection.CreateCommand();
 
-        // The trailing separator stops "Dan Da Dan" matching "Dandadan 2nd Season".
+        // The trailing separator stops "Attack On Titan" matching "Attack On Titan Abridged"
+        // (a true string prefix, unlike same-length lookalikes such as "Dan Da Dan" vs
+        // "Dandadan 2nd Season", which never collide as a LIKE prefix regardless of this).
         // The watch_state join is case-insensitive because watch_state.location is stored
         // upper-invariant while media_records.path keeps its original casing.
         cmd.CommandText = """
@@ -33,6 +35,8 @@ public sealed partial class DatabaseService
 
         string prefix = folderPath.TrimEnd(Path.DirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
+        // The % must be appended AFTER EscapeLike; escaping the wildcard itself makes every
+        // query silently return nothing.
         cmd.Parameters.AddWithValue("@prefix", EscapeLike(prefix) + "%");
 
         using SqliteDataReader reader = cmd.ExecuteReader();
