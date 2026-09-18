@@ -594,6 +594,15 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         }
     }
 
+    // Mirrors MetadataScrapeCoordinator's own DefaultInterFolderDelay: AniList documents 90
+    // requests/minute plus a stricter burst limiter, Jikan documents 60/minute. This loop cannot
+    // see whether a given ScrapeFolderAsync call actually reached a provider (that distinction is
+    // internal to the coordinator, which paces its own ScrapeLibraryAsync loop the same way) or
+    // short-circuited from cache, so it paces unconditionally rather than risk tripping either
+    // limit during a first scan of a fresh cache - at the cost of a rescan running slower than it
+    // strictly needs to.
+    private static readonly TimeSpan InterFolderDelay = TimeSpan.FromMilliseconds(1500);
+
     /// <summary>
     /// Scrapes every known library folder and, for the ones that yield a fresh match with a poster
     /// URL, downloads and stores that poster. The poster URL only ever exists on a fresh (uncached)
@@ -636,6 +645,12 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
             }
 
             progress.Report((int)((i + 1) * 100.0 / folders.Count));
+
+            bool isLastFolder = i == folders.Count - 1;
+            if (!isLastFolder)
+            {
+                await Task.Delay(InterFolderDelay, ct);
+            }
         }
     }
 
