@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -13,10 +15,15 @@ using Windows.Storage;
 using Windows.Storage.FileProperties;
 using Windows.Storage.Streams;
 
+// Exposes TryWriteScrapedPosterRowAsync so the manual-poster guard can be verified against a real
+// database, isolated from the network/file-system steps SetScrapedPosterAsync also performs. Not
+// part of the public IArtworkService contract.
+[assembly: InternalsVisibleTo("Screenbox.Core.Tests")]
+
 namespace Screenbox.Core.Services;
 
 /// <inheritdoc cref="IArtworkService"/>
-public sealed class ArtworkService : IArtworkService
+public sealed partial class ArtworkService : IArtworkService, IDisposable
 {
     /// <summary>Folder name inside local storage where artwork is cached.</summary>
     public const string ArtworkFolderName = "Artwork";
@@ -42,6 +49,14 @@ public sealed class ArtworkService : IArtworkService
     private readonly ConcurrentDictionary<string, byte> _foldersWithoutArtwork = new(StringComparer.OrdinalIgnoreCase);
 
     private static long _artworkSequence;
+
+    private static readonly TimeSpan PosterDownloadTimeout = TimeSpan.FromSeconds(15);
+
+    // Lazily created on first scraped-poster download, exactly like IMetadataProviderFactory's own
+    // HttpClient: nothing network-capable exists until the user has opted in AND explicitly run a
+    // scan, never merely because ArtworkService (an always-registered singleton) was constructed.
+    private readonly object _httpClientLock = new();
+    private HttpClient? _httpClient;
 
     public ArtworkService(IDatabaseService databaseService, ILogger<ArtworkService> logger)
     {
@@ -185,6 +200,143 @@ public sealed class ArtworkService : IArtworkService
             _logger.LogError(e, "Failed to set manual poster for '{Path}'.", folder.Path);
             return null;
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(posterUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            // Checked here too, before spending a network round trip: a manual poster is never
+            // displaced, so a folder that already has one costs nothing to skip. The write below
+            // checks again immediately before committing - that second check, not this one, is the
+            // guarantee that actually matters, since a manual poster could be set while the
+            // download below is still in flight.
+            FolderMetadataDto? existing = await _databaseService.LoadFolderMetadataAsync(folderPath);
+            if (IsProtectedByManualPoster(existing))
+            {
+                return false;
+            }
+
+            byte[]? bytes = await DownloadPosterBytesAsync(posterUrl, ct);
+            if (bytes is not { Length: > 0 })
+            {
+                return false;
+            }
+
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            string fileName = BuildFileName(folderPath, PosterSource.Scraped, GetExtensionFromUrl(posterUrl));
+            StorageFile target = await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+            await FileIO.WriteBytesAsync(target, bytes);
+
+            if (!await TryWriteScrapedPosterRowAsync(folderPath, fileName))
+            {
+                // Lost a race against a manual poster set while the download was in flight -
+                // discard the file just written rather than leaving an orphaned image behind.
+                await TryDeleteArtworkFileAsync(artworkFolder, fileName);
+                return false;
+            }
+
+            _foldersWithoutArtwork.TryRemove(folderPath, out _);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to download and store a scraped poster for '{Path}'.", folderPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Guard-checks and records a downloaded scraped poster file for a folder, isolated from the
+    /// network and file-system steps <see cref="SetScrapedPosterAsync"/> also performs, so the
+    /// guarantee that a scrape can never overwrite a manual poster is verifiable against a real
+    /// database alone. Internal: not part of the public artwork contract.
+    /// </summary>
+    internal async Task<bool> TryWriteScrapedPosterRowAsync(string folderPath, string fileName)
+    {
+        FolderMetadataDto? existing = await _databaseService.LoadFolderMetadataAsync(folderPath);
+        if (IsProtectedByManualPoster(existing))
+        {
+            return false;
+        }
+
+        await _databaseService.SetFolderPosterAsync(folderPath, fileName, PosterSource.Scraped);
+        return true;
+    }
+
+    /// <summary>
+    /// True when a folder's stored poster came from the user directly. This is the single guard
+    /// that keeps a scrape from ever clobbering it: the scrape coordinator never writes poster
+    /// columns at all (see <c>MetadataScrapeCoordinator</c>), so this is the only place that
+    /// guarantee is enforced at write time.
+    /// </summary>
+    private static bool IsProtectedByManualPoster(FolderMetadataDto? metadata) =>
+        metadata is { PosterSource: PosterSource.Manual };
+
+    private async Task<byte[]?> DownloadPosterBytesAsync(string posterUrl, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            return null;
+        }
+
+        HttpClient client = GetOrCreateHttpClient();
+        using HttpResponseMessage response =
+            await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        long? expectedLength = response.Content.Headers.ContentLength;
+        byte[] bytes = await response.Content.ReadAsByteArrayAsync(ct);
+
+        // A body shorter than its declared length is a truncated download, not a poster -
+        // committing it would replace good artwork with a broken file.
+        if (bytes.Length == 0 || (expectedLength is > 0 && bytes.Length != expectedLength))
+        {
+            return null;
+        }
+
+        return bytes;
+    }
+
+    private HttpClient GetOrCreateHttpClient()
+    {
+        if (_httpClient is { } existing)
+        {
+            return existing;
+        }
+
+        lock (_httpClientLock)
+        {
+            return _httpClient ??= new HttpClient { Timeout = PosterDownloadTimeout };
+        }
+    }
+
+    private static string GetExtensionFromUrl(string posterUrl)
+    {
+        if (Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri))
+        {
+            string extension = System.IO.Path.GetExtension(uri.AbsolutePath);
+            if (ConventionExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+            {
+                return extension;
+            }
+        }
+
+        return ".jpg";
     }
 
     /// <inheritdoc/>
@@ -366,4 +518,7 @@ public sealed class ArtworkService : IArtworkService
         ulong discriminator = unchecked((ulong)DateTime.UtcNow.Ticks + (ulong)Interlocked.Increment(ref _artworkSequence));
         return string.Concat(prefix, hash.ToString("x8"), "_", discriminator.ToString("x"), extension);
     }
+
+    /// <inheritdoc/>
+    public void Dispose() => _httpClient?.Dispose();
 }

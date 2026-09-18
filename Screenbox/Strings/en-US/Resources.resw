@@ -875,6 +875,39 @@
   <data name="SettingsSearchRemovableStorageDescription" xml:space="preserve">
     <value>Include media from storage devices like USB sticks in your libraries</value>
   </data>
+  <data name="SettingsOnlineMetadataHeader" xml:space="preserve">
+    <value>Online metadata</value>
+  </data>
+  <data name="SettingsOnlineMetadataDescription" xml:space="preserve">
+    <value>Look up titles, synopses, and posters for your library folders from online sources. Off by default; nothing is sent online until you turn this on.</value>
+  </data>
+  <data name="SettingsMetadataProvidersHeader" xml:space="preserve">
+    <value>Providers</value>
+  </data>
+  <data name="SettingsMetadataUseAniListHeader" xml:space="preserve">
+    <value>AniList</value>
+  </data>
+  <data name="SettingsMetadataUseJikanHeader" xml:space="preserve">
+    <value>Jikan (MyAnimeList)</value>
+  </data>
+  <data name="SettingsMetadataUseTmdbHeader" xml:space="preserve">
+    <value>TMDB</value>
+  </data>
+  <data name="SettingsMetadataTmdbApiKeyHeader" xml:space="preserve">
+    <value>TMDB API key</value>
+  </data>
+  <data name="SettingsMetadataTmdbApiKeyDescription" xml:space="preserve">
+    <value>Required for TMDB. Get your own free key from themoviedb.org and paste it here.</value>
+  </data>
+  <data name="SettingsMetadataTmdbApiKeyPlaceholder" xml:space="preserve">
+    <value>API key</value>
+  </data>
+  <data name="SettingsMetadataScanNowHeader" xml:space="preserve">
+    <value>Scan library now</value>
+  </data>
+  <data name="SettingsMetadataScanNowDescription" xml:space="preserve">
+    <value>Look up metadata for folders in your library that do not have it yet</value>
+  </data>
   <data name="ActiveArguments" xml:space="preserve">
     <value>Active arguments</value>
   </data>

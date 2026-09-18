@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using Screenbox.Core.Models;
 using Windows.Storage;
@@ -36,4 +37,16 @@ public interface IArtworkService
     /// </summary>
     /// <param name="libraryFolderPaths">Absolute paths of the library roots that were just scanned.</param>
     Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths);
+
+    /// <summary>
+    /// Downloads a scraped poster from a provider's remote URL and stores it as the folder's
+    /// poster, recording <see cref="Enums.PosterSource.Scraped"/>. Refuses when the folder's
+    /// existing poster source is <see cref="Enums.PosterSource.Manual"/> - a manual poster is
+    /// user-authored and a scrape must never be able to replace it. A failed, cancelled, or
+    /// incomplete download never throws and never touches the folder's existing poster.
+    /// </summary>
+    /// <param name="folderPath">Absolute folder path; the row this poster is recorded against.</param>
+    /// <param name="posterUrl">Remote URL of the poster image, as returned by a provider match.</param>
+    /// <returns>True when the poster was downloaded and recorded; false otherwise.</returns>
+    Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct);
 }

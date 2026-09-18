@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -55,6 +57,25 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     [ObservableProperty] public partial bool PersistPlaybackPosition { get; set; }
     [ObservableProperty] public partial StorageFolder? FrameCaptureFolder { get; set; }
 
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ScanLibraryMetadataCommand))]
+    public partial bool MetadataEnabled { get; set; }
+
+    [ObservableProperty] public partial bool MetadataUseAniList { get; set; }
+    [ObservableProperty] public partial bool MetadataUseJikan { get; set; }
+    [ObservableProperty] public partial bool MetadataUseTmdb { get; set; }
+
+    // Verified against this project's SDK target: unlike classic UWP, PasswordBox.Password here is
+    // a real DependencyProperty (PasswordProperty), so it binds directly via {x:Bind, Mode=TwoWay}
+    // like every other control on this page - no PasswordChanged code-behind handler needed.
+    [ObservableProperty] public partial string TmdbApiKey { get; set; }
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ScanLibraryMetadataCommand))]
+    public partial bool IsScanningLibraryMetadata { get; set; }
+
+    [ObservableProperty] public partial int MetadataScanProgress { get; set; }
+
     public ObservableCollection<StorageFolder> MusicLocations { get; }
 
     public ObservableCollection<StorageFolder> VideoLocations { get; }
@@ -74,6 +95,9 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     private readonly LibraryContext _libraryContext;
     private readonly RecentContext _recentContext;
     private readonly ILibraryCoordinator _libraryCoordinator;
+    private readonly IMetadataScrapeCoordinator _metadataScrapeCoordinator;
+    private readonly IArtworkService _artworkService;
+    private readonly IDatabaseService _databaseService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _storageDeviceRefreshTimer;
     private readonly DeviceWatcher? _portableStorageDeviceWatcher;
@@ -82,6 +106,7 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     private static InitialValues? _initialValues;
     private StorageLibrary? _videosLibrary;
     private StorageLibrary? _musicLibrary;
+    private CancellationTokenSource? _metadataScanCts;
 
     private record InitialValues(string GlobalArguments, bool AdvancedMode, int VideoUpscaling, int Language)
     {
@@ -97,6 +122,9 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         LibraryContext libraryContext,
         RecentContext recentContext,
         ILibraryCoordinator libraryCoordinator,
+        IMetadataScrapeCoordinator metadataScrapeCoordinator,
+        IArtworkService artworkService,
+        IDatabaseService databaseService,
         IPlaybackProgressTracker playbackProgressTracker,
         ILogger<SettingsPageViewModel> logger)
     {
@@ -105,6 +133,9 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         _libraryContext = libraryContext;
         _recentContext = recentContext;
         _libraryCoordinator = libraryCoordinator;
+        _metadataScrapeCoordinator = metadataScrapeCoordinator;
+        _artworkService = artworkService;
+        _databaseService = databaseService;
         _playbackProgressTracker = playbackProgressTracker;
         _logger = logger;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
@@ -153,6 +184,11 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         UseMultipleInstances = _settingsService.UseMultipleInstances;
         VideoUpscaling = (int)_settingsService.VideoUpscale;
         GlobalArguments = _settingsService.GlobalArguments;
+        MetadataEnabled = _settingsService.MetadataEnabled;
+        MetadataUseAniList = _settingsService.MetadataUseAniList;
+        MetadataUseJikan = _settingsService.MetadataUseJikan;
+        MetadataUseTmdb = _settingsService.MetadataUseTmdb;
+        TmdbApiKey = _settingsService.TmdbApiKey;
         int maxVolume = _settingsService.MaxVolume;
         VolumeBoost = maxVolume switch
         {
@@ -381,6 +417,38 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         Messenger.Send(new SettingsChangedMessage(nameof(PersistPlaybackPosition), typeof(SettingsPageViewModel)));
     }
 
+    partial void OnMetadataEnabledChanged(bool value)
+    {
+        _settingsService.MetadataEnabled = value;
+        Messenger.Send(new SettingsChangedMessage(nameof(MetadataEnabled), typeof(SettingsPageViewModel)));
+    }
+
+    partial void OnMetadataUseAniListChanged(bool value)
+    {
+        _settingsService.MetadataUseAniList = value;
+        Messenger.Send(new SettingsChangedMessage(nameof(MetadataUseAniList), typeof(SettingsPageViewModel)));
+    }
+
+    partial void OnMetadataUseJikanChanged(bool value)
+    {
+        _settingsService.MetadataUseJikan = value;
+        Messenger.Send(new SettingsChangedMessage(nameof(MetadataUseJikan), typeof(SettingsPageViewModel)));
+    }
+
+    partial void OnMetadataUseTmdbChanged(bool value)
+    {
+        _settingsService.MetadataUseTmdb = value;
+        Messenger.Send(new SettingsChangedMessage(nameof(MetadataUseTmdb), typeof(SettingsPageViewModel)));
+    }
+
+    partial void OnTmdbApiKeyChanged(string value)
+    {
+        // Stored in unencrypted LocalSettings by design (a read-only TMDB key), but still never
+        // logged and never included in an exception message - see SettingsService.TmdbApiKey.
+        _settingsService.TmdbApiKey = value;
+        Messenger.Send(new SettingsChangedMessage(nameof(TmdbApiKey), typeof(SettingsPageViewModel)));
+    }
+
     [RelayCommand]
     private async Task RefreshLibrariesAsync()
     {
@@ -492,10 +560,93 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         }
     }
 
+    private bool CanScanLibraryMetadata() => MetadataEnabled && !IsScanningLibraryMetadata;
+
+    [RelayCommand(CanExecute = nameof(CanScanLibraryMetadata))]
+    private async Task ScanLibraryMetadataAsync()
+    {
+        // Nothing from this command may escape to the caller: it is invoked from a Button.Command,
+        // and any unhandled exception on that path is unhandled on the UI thread with no crash log.
+        IsScanningLibraryMetadata = true;
+        MetadataScanProgress = 0;
+        _metadataScanCts = new CancellationTokenSource();
+
+        try
+        {
+            await ScrapeLibraryAndDownloadPostersAsync(
+                new Progress<int>(value => MetadataScanProgress = value), _metadataScanCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Navigating away (see OnNavigatedFrom) or app teardown cancelled the scan - nothing to
+            // report.
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Online metadata library scan failed.");
+        }
+        finally
+        {
+            IsScanningLibraryMetadata = false;
+            MetadataScanProgress = 0;
+            _metadataScanCts?.Dispose();
+            _metadataScanCts = null;
+        }
+    }
+
+    /// <summary>
+    /// Scrapes every known library folder and, for the ones that yield a fresh match with a poster
+    /// URL, downloads and stores that poster. The poster URL only ever exists on a fresh (uncached)
+    /// <see cref="IMetadataScrapeCoordinator.ScrapeFolderAsync"/> result - a cached reconstruction
+    /// never carries one - so this loop calls that per-folder method directly rather than
+    /// <see cref="IMetadataScrapeCoordinator.ScrapeLibraryAsync"/>, which discards the match. One
+    /// folder's failure is logged and does not abort the rest, mirroring the coordinator's own
+    /// whole-library loop.
+    /// </summary>
+    private async Task ScrapeLibraryAndDownloadPostersAsync(IProgress<int> progress, CancellationToken ct)
+    {
+        List<FolderMetadataDto> folders = await _databaseService.ListFolderMetadataAsync();
+        if (folders.Count == 0)
+        {
+            progress.Report(100);
+            return;
+        }
+
+        for (int i = 0; i < folders.Count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            FolderMetadataDto folder = folders[i];
+            string folderName = Path.GetFileName(folder.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+            try
+            {
+                MetadataMatch? match = await _metadataScrapeCoordinator.ScrapeFolderAsync(folder.Path, folderName, ct);
+                if (match?.PosterUrl is { Length: > 0 } posterUrl)
+                {
+                    await _artworkService.SetScrapedPosterAsync(folder.Path, posterUrl, ct);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Failed to scrape online metadata for a library folder.");
+            }
+
+            progress.Report((int)((i + 1) * 100.0 / folders.Count));
+        }
+    }
+
     public void OnNavigatedFrom()
     {
         if (SystemInformation.IsXbox)
             _portableStorageDeviceWatcher?.Stop();
+
+        // A scan mid-flight when the user leaves the page should stop rather than keep running
+        // (and reporting progress) against a view model nothing is observing anymore.
+        _metadataScanCts?.Cancel();
     }
 
     public async Task LoadLibraryLocations()
