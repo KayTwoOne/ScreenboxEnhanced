@@ -13,32 +13,56 @@ namespace Screenbox.Core.Coordinators;
 /// <inheritdoc cref="IMetadataScrapeCoordinator"/>
 public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 {
+    // AniList documents 90 requests/minute plus a separate, stricter short-burst limiter; Jikan
+    // documents 60 requests/minute. 60/min is the stricter of the two named limits (1 request/sec
+    // average); this delay is deliberately more conservative than that floor - 1.5s between folders
+    // is 40/min - to leave headroom under AniList's burst limiter as well, since a fresh-cache scan
+    // issues one request per folder back-to-back. This is intentionally a plain fixed delay, not a
+    // backoff/retry policy - see the phase-5 plan's "out of scope" section.
+    private static readonly TimeSpan DefaultInterFolderDelay = TimeSpan.FromMilliseconds(1500);
+
     private readonly IMetadataProviderFactory _providerFactory;
     private readonly ISettingsService _settingsService;
     private readonly IDatabaseService _databaseService;
     private readonly ILogger<MetadataScrapeCoordinator> _logger;
+    private readonly TimeSpan _interFolderDelay;
 
     public MetadataScrapeCoordinator(
         IMetadataProviderFactory providerFactory,
         ISettingsService settingsService,
         IDatabaseService databaseService,
-        ILogger<MetadataScrapeCoordinator> logger)
+        ILogger<MetadataScrapeCoordinator> logger,
+        TimeSpan? interFolderDelay = null)
     {
         _providerFactory = providerFactory;
         _settingsService = settingsService;
         _databaseService = databaseService;
         _logger = logger;
+        _interFolderDelay = interFolderDelay ?? DefaultInterFolderDelay;
     }
 
     /// <inheritdoc/>
     public async Task<MetadataMatch?> ScrapeFolderAsync(string folderPath, string folderName, CancellationToken ct)
+    {
+        (MetadataMatch? match, bool _) = await ScrapeFolderCoreAsync(folderPath, folderName, ct);
+        return match;
+    }
+
+    /// <summary>
+    /// Does the actual work behind <see cref="ScrapeFolderAsync"/>, additionally reporting whether
+    /// this call reached a provider over the network (as opposed to short-circuiting from the scrape
+    /// cache, the disabled gate, or an empty query) - <see cref="ScrapeLibraryAsync"/> needs that bit
+    /// to know whether the inter-folder throttle applies.
+    /// </summary>
+    private async Task<(MetadataMatch? Match, bool HitNetwork)> ScrapeFolderCoreAsync(
+        string folderPath, string folderName, CancellationToken ct)
     {
         // The whole feature is opt-in. Nothing below this line may run - not the cache read, and
         // certainly not a provider - until the user has turned the master toggle on. This is the
         // single gate every path through this method passes through first.
         if (!_settingsService.MetadataEnabled)
         {
-            return null;
+            return (null, false);
         }
 
         string query = ResolveQuery(folderPath, folderName);
@@ -46,23 +70,26 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         FolderScrapeCacheDto? cached = await _databaseService.LoadScrapeCacheAsync(folderPath);
         if (cached is not null)
         {
-            // Already scraped (matched or not) - short-circuit without touching a provider.
-            return await BuildMatchFromCacheAsync(folderPath, query, cached);
+            // Already scraped (matched or not) - short-circuit without touching a provider, and
+            // therefore without costing a request the throttle needs to account for.
+            return (await BuildMatchFromCacheAsync(folderPath, query, cached), false);
         }
 
         if (string.IsNullOrEmpty(query))
         {
             // A bare season/specials folder whose parent yielded nothing searchable either.
             await SaveNoMatchAsync(folderPath);
-            return null;
+            return (null, false);
         }
 
         (MetadataMatch? accepted, string? providerName) = await FindBestMatchAsync(query, ct);
 
+        // Reaching FindBestMatchAsync means at least one provider request was made, whether or not
+        // it produced an accepted match.
         if (accepted is null)
         {
             await SaveNoMatchAsync(folderPath);
-            return null;
+            return (null, true);
         }
 
         await _databaseService.SaveScrapeCacheAsync(new FolderScrapeCacheDto
@@ -82,7 +109,7 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 
         await FillBlankTitleAsync(folderPath, accepted.Title);
 
-        return accepted;
+        return (accepted, true);
     }
 
     /// <inheritdoc/>
@@ -107,10 +134,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 
             FolderMetadataDto folder = knownFolders[i];
             string folderName = GetLastSegment(folder.Path);
+            bool hitNetwork = false;
 
             try
             {
-                await ScrapeFolderAsync(folder.Path, folderName, ct);
+                (_, hitNetwork) = await ScrapeFolderCoreAsync(folder.Path, folderName, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -125,16 +153,29 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             }
 
             progress?.Report((int)((i + 1) * 100.0 / knownFolders.Count));
+
+            bool isLastFolder = i == knownFolders.Count - 1;
+            if (hitNetwork && !isLastFolder)
+            {
+                // Only a folder that actually made a provider request costs the throttle - a
+                // cache-only rescan must run at full speed. The token is honoured here so a
+                // cancelled scan stops promptly instead of sitting out the rest of the delay.
+                await Task.Delay(_interFolderDelay, ct);
+            }
         }
     }
 
     /// <summary>
-    /// Tries each enabled provider in order and stops at the first one that returns anything.
-    /// Within that provider's results, the candidate with the highest score wins; it is only
-    /// "accepted" - and therefore returned - when that score clears
-    /// <see cref="MetadataMatchScorer.AcceptThreshold"/>. A provider that answered with only weak
-    /// candidates still stops the search: a later provider is never consulted, matching the
-    /// documented "first non-empty result wins" contract.
+    /// Tries each enabled provider in order and stops at the first one that produces an ACCEPTED
+    /// match - not merely the first one that returns anything. Within a given provider's results,
+    /// the candidate with the highest score is the one considered; it is only "accepted" when that
+    /// score clears <see cref="MetadataMatchScorer.AcceptThreshold"/>. A provider that answers with
+    /// only weak candidates (none of which clear the threshold) is treated exactly like a provider
+    /// that answered with nothing at all - the search falls through to the next enabled provider
+    /// rather than stopping. This is what makes a fallback provider (e.g. Jikan behind AniList)
+    /// actually useful: a handful of poor primary-provider candidates must not permanently block a
+    /// later provider from being consulted. A no-match is only reported once every enabled provider
+    /// has been tried and none produced an accepted candidate.
     /// </summary>
     private async Task<(MetadataMatch? Match, string? ProviderName)> FindBestMatchAsync(string query, CancellationToken ct)
     {
@@ -165,9 +206,13 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
                 }
             }
 
-            return bestScore >= MetadataMatchScorer.AcceptThreshold
-                ? (best with { Confidence = bestScore }, provider.Name)
-                : (null, null);
+            if (bestScore >= MetadataMatchScorer.AcceptThreshold)
+            {
+                return (best with { Confidence = bestScore }, provider.Name);
+            }
+
+            // Every candidate from this provider scored below the threshold - the same as an empty
+            // result set. Move on to the next enabled provider instead of stopping here.
         }
 
         return (null, null);

@@ -35,6 +35,13 @@ public interface IMetadataScrapeCoordinator
     /// Scrapes every known library folder, reporting completion percentage (0-100) as it goes. A
     /// no-op that immediately reports completion when the feature is disabled. A failure scraping
     /// one folder is logged and does not abort the scan of the rest.
+    /// <para>
+    /// A short, fixed delay is inserted between folders that actually reach a provider over the
+    /// network, to stay under the providers' documented rate limits during a first scan of a fresh
+    /// cache. A folder that short-circuits from the scrape cache costs no request and is never
+    /// delayed, so a rescan of an already-scraped library runs at full speed. The delay honours
+    /// <paramref name="ct"/>, so a cancelled scan stops promptly rather than waiting it out.
+    /// </para>
     /// </summary>
     Task ScrapeLibraryAsync(IProgress<int>? progress, CancellationToken ct);
 }

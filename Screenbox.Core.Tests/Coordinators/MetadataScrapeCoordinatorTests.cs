@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,9 +13,12 @@ namespace Screenbox.Core.Tests.Coordinators;
 
 public sealed class MetadataScrapeCoordinatorTests
 {
+    // Zero by default so every test using this helper runs at full speed - the throttle itself is
+    // exercised only by the tests below that construct a coordinator directly with an explicit
+    // delay, precisely so the rest of the suite never has to sleep for it.
     private static MetadataScrapeCoordinator CreateCoordinator(
         TestSettingsService settings, IMetadataProviderFactory factory, IDatabaseService database) =>
-        new(factory, settings, database, NullLogger<MetadataScrapeCoordinator>.Instance);
+        new(factory, settings, database, NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
 
     // Matches the brief's illustrative test exactly: a coordinator built from a single provider,
     // backed by a database that throws if touched at all - the disabled path must never reach it.
@@ -158,7 +162,7 @@ public sealed class MetadataScrapeCoordinatorTests
     }
 
     [Test]
-    public async Task ScrapeFolderAsync_TriesProvidersInOrder_FirstNonEmptyResultWins()
+    public async Task ScrapeFolderAsync_TriesProvidersInOrder_FirstAcceptedMatchWins()
     {
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
@@ -173,7 +177,7 @@ public sealed class MetadataScrapeCoordinatorTests
 
         await Assert.That(firstProvider.CallCount).IsEqualTo(1);
         await Assert.That(secondProvider.CallCount).IsEqualTo(0)
-            .Because("The first provider already answered - a later provider is never consulted, win or lose.");
+            .Because("The first provider's candidate already cleared the acceptance threshold - a later provider is never consulted once one has been accepted.");
         await Assert.That(result!.ProviderId).IsEqualTo("1");
     }
 
@@ -194,6 +198,40 @@ public sealed class MetadataScrapeCoordinatorTests
         await Assert.That(firstProvider.CallCount).IsEqualTo(1);
         await Assert.That(secondProvider.CallCount).IsEqualTo(1);
         await Assert.That(result!.ProviderId).IsEqualTo("2");
+    }
+
+    [Test]
+    public async Task ScrapeFolderAsync_FirstProviderOnlyWeakCandidates_FallsThroughToNextProvider()
+    {
+        // The behavioural fix this test locks in: a provider that answers with candidates - just
+        // none of them good enough to accept - must be treated exactly like a provider that
+        // answered with nothing at all. AniList is the primary source and Jikan exists precisely as
+        // the fallback for when AniList returns nothing USEFUL, not just nothing. Five confidently
+        // wrong AniList candidates must not permanently block Jikan from being tried.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+
+        // Every candidate here scores well below MetadataMatchScorer.AcceptThreshold against the
+        // "Dan Da Dan" query (see ScrapeFolderAsync_NoGoodCandidate_RecordsNoMatchRatherThanThrowing
+        // for the same pairing used to establish that).
+        var weakProvider = new FakeMetadataProvider("anilist",
+        [
+            new MetadataMatch("101", "Completely Unrelated Show Title", null, null, null),
+            new MetadataMatch("102", "Another Unrelated Title Entirely", null, null, null)
+        ]);
+        var goodProvider = new FakeMetadataProvider("jikan", [new MetadataMatch("2", "Dan Da Dan", null, 2024, null)]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var coordinator = CreateCoordinator(settings, new FakeMetadataProviderFactory(weakProvider, goodProvider), db);
+
+        MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
+
+        await Assert.That(weakProvider.CallCount).IsEqualTo(1);
+        await Assert.That(goodProvider.CallCount).IsEqualTo(1)
+            .Because("AniList's only candidates scored below threshold - the same as an empty result set - so Jikan must still be consulted.");
+        await Assert.That(result).IsNotNull();
+        await Assert.That(result!.ProviderId).IsEqualTo("2")
+            .Because("The first ACCEPTED match wins, not the first non-empty result set.");
     }
 
     // ------------------------------------------------------------------
@@ -329,5 +367,82 @@ public sealed class MetadataScrapeCoordinatorTests
         await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
 
         await Assert.That(provider.CallCount).IsEqualTo(2);
+    }
+
+    // ------------------------------------------------------------------
+    // Inter-folder throttle. A deliberately large delay (tens of seconds) is injected below - the
+    // same way AniListMetadataProvider's tests inject requestTimeout - specifically so these tests
+    // can prove the delay is skipped or cut short WITHOUT the suite ever sleeping for it: a test
+    // that mistakenly waited the delay out would be caught by the elapsed-time assertion, not by
+    // actually taking that long to run.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task ScrapeLibraryAsync_AllFoldersCached_DoesNotThrottleBetweenThem()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+
+        const string pathA = @"D:\Anime\Dan Da Dan";
+        const string pathB = @"D:\Anime\Frieren";
+        await db.SetFolderCustomTitleAsync(pathA, "Dan Da Dan");
+        await db.SetFolderCustomTitleAsync(pathB, "Frieren");
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = pathA, Provider = "anilist", ProviderId = "1", LastScraped = DateTimeOffset.UtcNow
+        });
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = pathB, Provider = "anilist", ProviderId = "2", LastScraped = DateTimeOffset.UtcNow
+        });
+
+        var provider = new FakeMetadataProvider("anilist");
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        // 30s: if the coordinator mistakenly throttled between these cache-only folders, this test
+        // would take over 30s to complete instead of the well-under-5s asserted below.
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+        stopwatch.Stop();
+
+        await Assert.That(provider.CallCount).IsEqualTo(0)
+            .Because("Both folders short-circuit from the scrape cache - no provider call, so no throttle applies.");
+        await Assert.That(stopwatch.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_CancelledDuringThrottleDelay_StopsPromptlyInsteadOfWaitingItOut()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+
+        // Two folders that both require a real provider call (no cache), so the throttle between
+        // them is actually exercised.
+        await db.SetFolderCustomTitleAsync(@"D:\Anime\Dan Da Dan", null);
+        await db.SetFolderCustomTitleAsync(@"D:\Anime\Frieren", null);
+
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("1", "Match", null, null, null)]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        // 30s: long enough that the test would be obviously, badly wrong if cancellation failed to
+        // cut the delay short - without this test itself ever waiting anywhere near that long.
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
+
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        await Assert.That(async () => await coordinator.ScrapeLibraryAsync(null, cts.Token))
+            .Throws<OperationCanceledException>();
+        stopwatch.Stop();
+
+        await Assert.That(provider.CallCount).IsEqualTo(1)
+            .Because("The first folder's provider call must complete before the throttle delay before the second folder begins.");
+        await Assert.That(stopwatch.Elapsed).IsLessThan(TimeSpan.FromSeconds(10))
+            .Because("The delay honours the CancellationToken, so cancellation cuts it short instead of sitting out the full 30s.");
     }
 }
