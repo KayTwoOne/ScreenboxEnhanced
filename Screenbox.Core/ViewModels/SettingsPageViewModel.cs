@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -96,8 +95,6 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     private readonly RecentContext _recentContext;
     private readonly ILibraryCoordinator _libraryCoordinator;
     private readonly IMetadataScrapeCoordinator _metadataScrapeCoordinator;
-    private readonly IArtworkService _artworkService;
-    private readonly IDatabaseService _databaseService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _storageDeviceRefreshTimer;
     private readonly DeviceWatcher? _portableStorageDeviceWatcher;
@@ -123,8 +120,6 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         RecentContext recentContext,
         ILibraryCoordinator libraryCoordinator,
         IMetadataScrapeCoordinator metadataScrapeCoordinator,
-        IArtworkService artworkService,
-        IDatabaseService databaseService,
         IPlaybackProgressTracker playbackProgressTracker,
         ILogger<SettingsPageViewModel> logger)
     {
@@ -134,8 +129,6 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         _recentContext = recentContext;
         _libraryCoordinator = libraryCoordinator;
         _metadataScrapeCoordinator = metadataScrapeCoordinator;
-        _artworkService = artworkService;
-        _databaseService = databaseService;
         _playbackProgressTracker = playbackProgressTracker;
         _logger = logger;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
@@ -573,7 +566,11 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
 
         try
         {
-            await ScrapeLibraryAndDownloadPostersAsync(
+            // The whole scan - per-folder looping, cache short-circuiting, provider fallback, the
+            // inter-folder throttle, and (since Task 6) applying any scraped poster - lives in the
+            // coordinator now. This command is just the UI-facing driver: it owns the progress
+            // reporting and the cancellation token, nothing about the scan's own mechanics.
+            await _metadataScrapeCoordinator.ScrapeLibraryAsync(
                 new Progress<int>(value => MetadataScanProgress = value), _metadataScanCts.Token);
         }
         catch (OperationCanceledException)
@@ -591,66 +588,6 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
             MetadataScanProgress = 0;
             _metadataScanCts?.Dispose();
             _metadataScanCts = null;
-        }
-    }
-
-    // Mirrors MetadataScrapeCoordinator's own DefaultInterFolderDelay: AniList documents 90
-    // requests/minute plus a stricter burst limiter, Jikan documents 60/minute. This loop cannot
-    // see whether a given ScrapeFolderAsync call actually reached a provider (that distinction is
-    // internal to the coordinator, which paces its own ScrapeLibraryAsync loop the same way) or
-    // short-circuited from cache, so it paces unconditionally rather than risk tripping either
-    // limit during a first scan of a fresh cache - at the cost of a rescan running slower than it
-    // strictly needs to.
-    private static readonly TimeSpan InterFolderDelay = TimeSpan.FromMilliseconds(1500);
-
-    /// <summary>
-    /// Scrapes every known library folder and, for the ones that yield a fresh match with a poster
-    /// URL, downloads and stores that poster. The poster URL only ever exists on a fresh (uncached)
-    /// <see cref="IMetadataScrapeCoordinator.ScrapeFolderAsync"/> result - a cached reconstruction
-    /// never carries one - so this loop calls that per-folder method directly rather than
-    /// <see cref="IMetadataScrapeCoordinator.ScrapeLibraryAsync"/>, which discards the match. One
-    /// folder's failure is logged and does not abort the rest, mirroring the coordinator's own
-    /// whole-library loop.
-    /// </summary>
-    private async Task ScrapeLibraryAndDownloadPostersAsync(IProgress<int> progress, CancellationToken ct)
-    {
-        List<FolderMetadataDto> folders = await _databaseService.ListFolderMetadataAsync();
-        if (folders.Count == 0)
-        {
-            progress.Report(100);
-            return;
-        }
-
-        for (int i = 0; i < folders.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            FolderMetadataDto folder = folders[i];
-            string folderName = Path.GetFileName(folder.Path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-
-            try
-            {
-                MetadataMatch? match = await _metadataScrapeCoordinator.ScrapeFolderAsync(folder.Path, folderName, ct);
-                if (match?.PosterUrl is { Length: > 0 } posterUrl)
-                {
-                    await _artworkService.SetScrapedPosterAsync(folder.Path, posterUrl, ct);
-                }
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception e)
-            {
-                _logger.LogError(e, "Failed to scrape online metadata for a library folder.");
-            }
-
-            progress.Report((int)((i + 1) * 100.0 / folders.Count));
-
-            bool isLastFolder = i == folders.Count - 1;
-            if (!isLastFolder)
-            {
-                await Task.Delay(InterFolderDelay, ct);
-            }
         }
     }
 

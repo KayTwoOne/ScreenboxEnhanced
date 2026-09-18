@@ -4,6 +4,7 @@ using Screenbox.Core.Enums;
 using Screenbox.Core.Models;
 using Screenbox.Core.Services;
 using Screenbox.Core.Tests.Helpers;
+using Windows.Storage;
 
 namespace Screenbox.Core.Tests.Services;
 
@@ -141,11 +142,14 @@ public sealed class ArtworkServiceTests
 
         // A scrape that genuinely finds a match with a poster URL - Task 5's real coordinator, run
         // against this same database, exactly as the settings page's scan command would drive it.
+        // A FakeArtworkService here keeps this call network-free; the real ArtworkService guard is
+        // what this test exercises directly below, via TryWriteScrapedPosterRowAsync.
         var provider = new FakeMetadataProvider("anilist",
             [new MetadataMatch("1", "Dan Da Dan", "synopsis", 2024, "https://example.com/scraped-poster.jpg")]);
         var settings = new TestSettingsService { MetadataEnabled = true };
         var coordinator = new MetadataScrapeCoordinator(
-            new FakeMetadataProviderFactory(provider), settings, db, NullLogger<MetadataScrapeCoordinator>.Instance);
+            new FakeMetadataProviderFactory(provider), settings, db, new FakeArtworkService(),
+            NullLogger<MetadataScrapeCoordinator>.Instance);
 
         MetadataMatch? match = await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
         await Assert.That(match).IsNotNull();
@@ -202,7 +206,15 @@ public sealed class ArtworkServiceTests
         const string path = @"D:\Anime\Frieren";
         await db.SetFolderPosterAsync(path, "g_auto_frame.jpg", PosterSource.AutoFrame);
 
-        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+        // A superseded poster now triggers a real delete attempt (Finding 2), which needs a real
+        // artwork folder to resolve - ApplicationData.Current needs package identity this test
+        // host does not have, so ArtworkFolderPath is redirected to a throwaway temp directory
+        // instead (see ArtworkService.ArtworkFolderPath's own doc comment).
+        using var artworkFixture = new TestDirectoryFixture();
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
 
         bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, "g_scraped_poster.jpg");
 
@@ -211,6 +223,41 @@ public sealed class ArtworkServiceTests
         FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
         await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.Scraped);
         await Assert.That(persisted.PosterFile).IsEqualTo("g_scraped_poster.jpg");
+    }
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ExistingAutoFramePoster_DeletesTheSupersededFile()
+    {
+        // Finding 2: every OTHER poster writer in this file (see RecordPosterAsync) captures the
+        // file name a write supersedes and deletes it via TryDeleteArtworkFileAsync.
+        // TryWriteScrapedPosterRowAsync used to discard that return value, so an AutoFrame or
+        // Convention poster superseded by a scraped one was never deleted - orphaned on disk
+        // forever. ExistingAutoFramePoster_IsReplacedByTheScrapedOne above only proves the ROW
+        // changed; this proves the superseded FILE is actually gone.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren - Orphan Check";
+        const string oldFileName = "g_orphan_check_old.jpg";
+        const string newFileName = "g_orphan_check_new.jpg";
+        await db.SetFolderPosterAsync(path, oldFileName, PosterSource.AutoFrame);
+
+        // A real (throwaway, auto-cleaned-up) directory stands in for the local Artwork folder:
+        // ApplicationData.Current needs package identity this test host does not have, but
+        // StorageFolder.GetFolderFromPathAsync works against any real path without it.
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(oldFileName, CreationCollisionOption.ReplaceExisting);
+
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, newFileName);
+
+        await Assert.That(written).IsTrue();
+        await Assert.That(await artworkFolder.TryGetItemAsync(oldFileName)).IsNull()
+            .Because("The AutoFrame poster this scrape superseded must be deleted, not left orphaned on disk.");
     }
 
     [Test]

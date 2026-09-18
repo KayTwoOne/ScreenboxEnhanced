@@ -22,6 +22,11 @@ public interface IMetadataScrapeCoordinator
     /// disabled, the folder yields no searchable query, or no provider candidate clears the
     /// acceptance threshold - a confident wrong match is worse than no match, so a weak result is
     /// reported as no match rather than guessed at.
+    /// <para>
+    /// When a fresh (uncached) match carries a poster URL, this also downloads and stores that
+    /// poster as the folder's artwork, subject to <see cref="IArtworkService"/>'s own guarantee that
+    /// a <see cref="Enums.PosterSource.Manual"/> poster is never displaced.
+    /// </para>
     /// </summary>
     /// <param name="folderPath">Absolute path of the folder; the cache and metadata key.</param>
     /// <param name="folderName">

@@ -64,6 +64,15 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
         _logger = logger;
     }
 
+    /// <summary>
+    /// Overrides where the local Artwork folder resolves to. Empty by default, which means the
+    /// production path: a subfolder of <see cref="ApplicationData.Current"/>'s local folder. Unlike
+    /// that API, <see cref="StorageFolder.GetFolderFromPathAsync"/> needs no package identity, so
+    /// tests set this to a real temporary directory instead - mirroring
+    /// <see cref="DatabaseService.DbFolderPath"/>'s own pattern for redirecting storage in tests.
+    /// </summary>
+    public string ArtworkFolderPath { get; set; } = string.Empty;
+
     /// <summary>Returns true when the file name is a recognised poster convention.</summary>
     public static bool IsConventionFileName(string fileName)
     {
@@ -261,6 +270,13 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
     /// network and file-system steps <see cref="SetScrapedPosterAsync"/> also performs, so the
     /// guarantee that a scrape can never overwrite a manual poster is verifiable against a real
     /// database alone. Internal: not part of the public artwork contract.
+    /// <para>
+    /// Mirrors <see cref="RecordPosterAsync"/>'s own pattern: when this write supersedes a
+    /// different file (an AutoFrame or Convention poster, never a Manual one - that case already
+    /// returned above), the superseded file is deleted so it is not orphaned on disk forever. The
+    /// artwork folder is only resolved when a supersession actually needs deleting, so the common
+    /// case (no prior poster) never touches it at all.
+    /// </para>
     /// </summary>
     internal async Task<bool> TryWriteScrapedPosterRowAsync(string folderPath, string fileName)
     {
@@ -270,15 +286,23 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
             return false;
         }
 
-        await _databaseService.SetFolderPosterAsync(folderPath, fileName, PosterSource.Scraped);
+        string? previousPosterFile = await _databaseService.SetFolderPosterAsync(folderPath, fileName, PosterSource.Scraped);
+        if (previousPosterFile is { Length: > 0 }
+            && !string.Equals(previousPosterFile, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            await TryDeleteArtworkFileAsync(artworkFolder, previousPosterFile);
+        }
+
         return true;
     }
 
     /// <summary>
     /// True when a folder's stored poster came from the user directly. This is the single guard
     /// that keeps a scrape from ever clobbering it: the scrape coordinator never writes poster
-    /// columns at all (see <c>MetadataScrapeCoordinator</c>), so this is the only place that
-    /// guarantee is enforced at write time.
+    /// columns directly, only through <see cref="SetScrapedPosterAsync"/> (see
+    /// <c>MetadataScrapeCoordinator</c>), so this is the only place that guarantee is enforced at
+    /// write time.
     /// </summary>
     private static bool IsProtectedByManualPoster(FolderMetadataDto? metadata) =>
         metadata is { PosterSource: PosterSource.Manual };
@@ -387,9 +411,11 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
         }
     }
 
-    private static async Task<StorageFolder> GetArtworkFolderAsync() =>
-        await ApplicationData.Current.LocalFolder.CreateFolderAsync(
-            ArtworkFolderName, CreationCollisionOption.OpenIfExists);
+    private async Task<StorageFolder> GetArtworkFolderAsync() =>
+        string.IsNullOrEmpty(ArtworkFolderPath)
+            ? await ApplicationData.Current.LocalFolder.CreateFolderAsync(
+                ArtworkFolderName, CreationCollisionOption.OpenIfExists)
+            : await StorageFolder.GetFolderFromPathAsync(ArtworkFolderPath);
 
     private static async Task<StorageFile?> FindConventionFileAsync(StorageFolder folder)
     {

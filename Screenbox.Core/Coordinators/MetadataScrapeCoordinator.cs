@@ -24,6 +24,7 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     private readonly IMetadataProviderFactory _providerFactory;
     private readonly ISettingsService _settingsService;
     private readonly IDatabaseService _databaseService;
+    private readonly IArtworkService _artworkService;
     private readonly ILogger<MetadataScrapeCoordinator> _logger;
     private readonly TimeSpan _interFolderDelay;
 
@@ -31,12 +32,14 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         IMetadataProviderFactory providerFactory,
         ISettingsService settingsService,
         IDatabaseService databaseService,
+        IArtworkService artworkService,
         ILogger<MetadataScrapeCoordinator> logger,
         TimeSpan? interFolderDelay = null)
     {
         _providerFactory = providerFactory;
         _settingsService = settingsService;
         _databaseService = databaseService;
+        _artworkService = artworkService;
         _logger = logger;
         _interFolderDelay = interFolderDelay ?? DefaultInterFolderDelay;
     }
@@ -52,7 +55,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     /// Does the actual work behind <see cref="ScrapeFolderAsync"/>, additionally reporting whether
     /// this call reached a provider over the network (as opposed to short-circuiting from the scrape
     /// cache, the disabled gate, or an empty query) - <see cref="ScrapeLibraryAsync"/> needs that bit
-    /// to know whether the inter-folder throttle applies.
+    /// to know whether the inter-folder throttle applies. This is also the single place a fresh
+    /// match's poster is downloaded and stored (via <see cref="IArtworkService.SetScrapedPosterAsync"/>),
+    /// so both <see cref="ScrapeFolderAsync"/> and <see cref="ScrapeLibraryAsync"/> apply artwork the
+    /// same way - a cached reconstruction never carries a poster URL, so that branch never reaches
+    /// this step.
     /// </summary>
     private async Task<(MetadataMatch? Match, bool HitNetwork)> ScrapeFolderCoreAsync(
         string folderPath, string folderName, CancellationToken ct)
@@ -108,6 +115,14 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         });
 
         await FillBlankTitleAsync(folderPath, accepted.Title);
+
+        if (accepted.PosterUrl is { Length: > 0 } posterUrl)
+        {
+            // Guarded internally by IArtworkService: a folder whose poster source is already
+            // Manual is never displaced, so this can never route around that check no matter how
+            // many callers end up going through this method.
+            await _artworkService.SetScrapedPosterAsync(folderPath, posterUrl, ct);
+        }
 
         return (accepted, true);
     }
@@ -271,9 +286,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 
     /// <summary>
     /// Fills the folder's display title from a scrape, but only when the user has never set one.
-    /// This is the guard that keeps a scrape from clobbering a custom title - and, just as
-    /// importantly, it is the ONLY folder_metadata write this coordinator performs: it never touches
-    /// <c>poster_file</c> or <c>poster_source</c> at all, so a manual (or any other source's) poster
+    /// This is the guard that keeps a scrape from clobbering a custom title - and it is the ONLY
+    /// <c>folder_metadata</c> write this coordinator performs directly: it never touches
+    /// <c>poster_file</c> or <c>poster_source</c> itself. Those columns are written, if at all, by
+    /// <see cref="IArtworkService.SetScrapedPosterAsync"/> immediately after this call returns, which
+    /// carries its own independent Manual-source guard - so a manual (or any other source's) poster
     /// survives a scrape untouched no matter what happens to the title.
     /// <see cref="IDatabaseService.SetFolderCustomTitleAsync"/> is a single-column writer for
     /// exactly this reason - unlike <see cref="IDatabaseService.SaveFolderMetadataAsync"/>, it

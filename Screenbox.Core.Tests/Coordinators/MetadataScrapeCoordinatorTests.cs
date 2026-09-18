@@ -15,10 +15,14 @@ public sealed class MetadataScrapeCoordinatorTests
 {
     // Zero by default so every test using this helper runs at full speed - the throttle itself is
     // exercised only by the tests below that construct a coordinator directly with an explicit
-    // delay, precisely so the rest of the suite never has to sleep for it.
+    // delay, precisely so the rest of the suite never has to sleep for it. A FakeArtworkService
+    // keeps a fresh match's poster download from ever reaching a real HttpClient - see its own
+    // doc comment. The one test that must prove the real Manual-poster guard end-to-end
+    // (ScrapeFolderAsync_NeverOverwritesAManualPosterOrCustomTitle) builds its own coordinator with
+    // a real ArtworkService instead of using this helper.
     private static MetadataScrapeCoordinator CreateCoordinator(
         TestSettingsService settings, IMetadataProviderFactory factory, IDatabaseService database) =>
-        new(factory, settings, database, NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+        new(factory, settings, database, new FakeArtworkService(), NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
 
     // Matches the brief's illustrative test exactly: a coordinator built from a single provider,
     // backed by a database that throws if touched at all - the disabled path must never reach it.
@@ -317,6 +321,13 @@ public sealed class MetadataScrapeCoordinatorTests
     public async Task ScrapeFolderAsync_NeverOverwritesAManualPosterOrCustomTitle()
     {
         // folder_metadata is durable user data. A scrape may fill blanks, never clobber choices.
+        // This is the guarantee the whole phase rests on, so - unlike every other test in this
+        // file - this one builds a REAL ArtworkService (backed by the same real database) instead
+        // of using the CreateCoordinator helper's FakeArtworkService: the guarantee must be proven
+        // against the actual write path the coordinator now drives, not a stand-in that would pass
+        // even if the real guard were deleted. This stays network-free because the folder already
+        // has a Manual poster before the scrape runs - ArtworkService.SetScrapedPosterAsync checks
+        // that and returns before ever reaching the HTTP download.
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
         const string path = @"D:\Anime\Dan Da Dan";
@@ -329,11 +340,16 @@ public sealed class MetadataScrapeCoordinatorTests
         var provider = new FakeMetadataProvider("anilist",
             [new MetadataMatch("1", "Dan Da Dan", "A different synopsis.", 2024, "https://example.com/scraped-poster.jpg")]);
         var settings = new TestSettingsService { MetadataEnabled = true };
-        var coordinator = CreateCoordinator(settings, new FakeMetadataProviderFactory(provider), db);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db, artworkService,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
 
         MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
 
         await Assert.That(result).IsNotNull().Because("The scrape itself must still succeed and be cached.");
+        await Assert.That(result!.PosterUrl).IsNotNull()
+            .Because("The guard this test exercises only matters when a scrape genuinely found a poster to (almost) act on.");
 
         // The assertion that matters: read the persisted row back from the database, not from
         // ArtworkResolver or any other reader. A resolver's read-time precedence cannot protect
@@ -401,7 +417,7 @@ public sealed class MetadataScrapeCoordinatorTests
         // 30s: if the coordinator mistakenly throttled between these cache-only folders, this test
         // would take over 30s to complete instead of the well-under-5s asserted below.
         var coordinator = new MetadataScrapeCoordinator(
-            new FakeMetadataProviderFactory(provider), settings, db,
+            new FakeMetadataProviderFactory(provider), settings, db, new FakeArtworkService(),
             NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
 
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -429,7 +445,7 @@ public sealed class MetadataScrapeCoordinatorTests
         // 30s: long enough that the test would be obviously, badly wrong if cancellation failed to
         // cut the delay short - without this test itself ever waiting anywhere near that long.
         var coordinator = new MetadataScrapeCoordinator(
-            new FakeMetadataProviderFactory(provider), settings, db,
+            new FakeMetadataProviderFactory(provider), settings, db, new FakeArtworkService(),
             NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
 
         using var cts = new CancellationTokenSource();
