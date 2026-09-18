@@ -67,6 +67,7 @@ public static class ServiceHelpers
         services.AddSingleton<ILibraryCoordinator, LibraryCoordinator>();
         services.AddSingleton<IPlayQueueCoordinator, PlayQueueCoordinator>();
         services.AddSingleton<IPlaybackProgressTracker, PlaybackProgressTracker>();
+        services.AddSingleton<IMetadataScrapeCoordinator, MetadataScrapeCoordinator>();
 
         // Services
         services.AddSingleton<IDatabaseService, DatabaseService>();
@@ -83,5 +84,11 @@ public static class ServiceHelpers
         services.AddSingleton<IPlaylistService, PlaylistService>();
         services.AddSingleton<IWatchStateService, WatchStateService>();
         services.AddSingleton<IFolderStatsService, FolderStatsService>();
+
+        // Metadata scraping is opt-in and off by default. Only the factory and the coordinator are
+        // registered here - never an HttpClient or a provider - so nothing network-capable is
+        // constructed at app startup. The factory constructs its single shared HttpClient lazily,
+        // on first use, only after the coordinator has confirmed the user opted in.
+        services.AddSingleton<IMetadataProviderFactory, MetadataProviderFactory>();
     }
 }

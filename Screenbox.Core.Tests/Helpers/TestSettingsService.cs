@@ -42,4 +42,9 @@ public class TestSettingsService : ISettingsService
     public SongSortOrder PersistentSongsSortOrder { get; set; } = SongSortOrder.Title;
     public AlbumSortOrder PersistentAlbumsSortOrder { get; set; } = AlbumSortOrder.Title;
     public double WatchedThresholdPercent { get; set; } = WatchThreshold.DefaultPercent;
+    public bool MetadataEnabled { get; set; }
+    public bool MetadataUseAniList { get; set; }
+    public bool MetadataUseJikan { get; set; }
+    public bool MetadataUseTmdb { get; set; }
+    public string TmdbApiKey { get; set; } = string.Empty;
 }
