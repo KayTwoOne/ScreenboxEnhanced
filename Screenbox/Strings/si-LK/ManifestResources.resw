@@ -118,10 +118,10 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="AppDisplayName" xml:space="preserve">
-    <value>Screenbox</value>
+    <value>Screenbox Enhanced</value>
   </data>
   <data name="AppShortName" xml:space="preserve">
-    <value>Screenbox</value>
+    <value>Screenbox Enhanced</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
     <value>පුළුල් පරාසයක වින්ඩෝස් උපාංගවල කාර්ය සාධනය සහ භාවිතයේ පහසුව කෙරෙහි අවධානය යොමු කරන නවීන වීඩියෝ ධාවකයකි.</value>

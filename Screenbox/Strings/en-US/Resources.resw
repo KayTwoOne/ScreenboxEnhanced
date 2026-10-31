@@ -365,7 +365,7 @@
     <value>Settings</value>
   </data>
   <data name="WelcomePanelHeader" xml:space="preserve">
-    <value>Welcome to Screenbox</value>
+    <value>Welcome to Screenbox Enhanced</value>
   </data>
   <data name="WelcomePanelSubtext" xml:space="preserve">
     <value>Let's start playing some of your media content to get things going.</value>
@@ -583,7 +583,7 @@
     <comment>#Format[Plural Int]</comment>
   </data>
   <data name="AccessDeniedMessage" xml:space="preserve">
-    <value>Access denied. Please verify your privacy settings to ensure Screenbox has sufficient permissions.</value>
+    <value>Access denied. Please verify your privacy settings to ensure Screenbox Enhanced has sufficient permissions.</value>
   </data>
   <data name="AccessDeniedMusicLibraryTitle" xml:space="preserve">
     <value>Can't access music library</value>
@@ -709,7 +709,7 @@
     <value>Slide vertically to adjust volume</value>
   </data>
   <data name="AppFriendlyName" xml:space="preserve">
-    <value>Screenbox Media Player</value>
+    <value>Screenbox Enhanced</value>
   </data>
   <data name="HyperlinkSourceCode" xml:space="preserve">
     <value>Source code</value>
@@ -1227,5 +1227,19 @@
   <data name="Save" xml:space="preserve">
     <value>Save</value>
   </data>
+  <data name="AboutBasedOn" xml:space="preserve">
+    <value>Based on Screenbox by Tung Huynh</value>
+  </data>
+  <data name="HyperlinkOriginalProject" xml:space="preserve">
+    <value>Original Screenbox project</value>
+  </data>
+  <data name="HyperlinkReportIssue" xml:space="preserve">
+    <value>Report an issue</value>
+  </data>
+  <data name="HyperlinkSupportOriginalAuthor" xml:space="preserve">
+    <value>Support the original author</value>
+  </data>
+  <data name="AboutMetadataAttribution" xml:space="preserve">
+    <value>Optional online metadata is provided by AniList, Jikan (an unofficial MyAnimeList API) and TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.</value>
+  </data>
 </root>
-

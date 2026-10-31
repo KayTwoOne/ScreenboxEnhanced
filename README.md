@@ -2,24 +2,23 @@
   <img width="128" align="center" src="Screenbox/Assets/StoreLogo.scale-400.png">
 </p>
 <h1 align="center">
-  Screenbox
+  Screenbox Enhanced
 </h1>
 <p align="center">
-  The modern media player for Windows
-</p>
-<p align="center">
-  <a href='https://apps.microsoft.com/detail/9NTSNMSVCB5L?cid=storebadge&mode=mini'>
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://get.microsoft.com/images/en-us%20light.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://get.microsoft.com/images/en-us%20dark.svg">
-      <img alt="Store link" src="https://get.microsoft.com/images/en-us%20dark.svg" height="50px">
-    </picture>
-  </a>
+  A personal media centre for Windows, built on Screenbox
 </p>
 
-Screenbox is a modern video player that cares about performance and ease of use on a wide range of device types. It features a beautiful, friendly user interface that is fast and lightweight. Screenbox is available on Windows 10 version 1903 and up, Windows 11, and Xbox consoles.
+Screenbox Enhanced is a fork of [Screenbox](https://github.com/huynhsontung/Screenbox), the modern media player by [Tung Huynh](https://github.com/huynhsontung). Everything that makes Screenbox a fast, friendly player is still here. This fork adds a library layer on top, for people who keep a collection of series and films on their own drives.
 
-Screenbox is built on top of [LibVLCSharp](https://github.com/videolan/libvlcsharp) and the Universal Windows Platform (UWP).
+Screenbox is licensed under GPL-3.0, and so is this fork. Credit for the player belongs to the original project. If you just want a great player, [get Screenbox from the Microsoft Store](https://www.microsoft.com/store/apps/9NTSNMSVCB5L).
+
+## What this fork adds
+
+- **Folder artwork and titles** - pick your own poster and display name for any library folder, or let it use `poster.jpg` / `folder.jpg` or a frame from the first episode
+- **Watched tracking** - episodes are marked watched as you finish them, with progress bars and a Continue Watching row on Home
+- **Episode awareness** - episode numbers and titles are parsed from file names, so a season reads as an ordered list
+- **Folder summaries** - each folder shows its episode count, total runtime and how many are unwatched
+- **Optional online metadata** - look up posters, synopses and years from AniList, Jikan and TMDB. This is off by default and sends nothing until you enable it. See the [privacy policy](PRIVACY.md).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="/assets/images/docs/PC-HeroHomePage-Dark.png?raw=true">
@@ -29,7 +28,7 @@ Screenbox is built on top of [LibVLCSharp](https://github.com/videolan/libvlcsha
 
 ![Screenshot of the Screenbox video player](/assets/images/docs/PC-HeroPlayerPageVideo_Dark.png)
 
-Some notable features:
+Everything from Screenbox carries over:
 
 - Fluent design user interface
 - Gesture support for seeking and changing volume
@@ -40,15 +39,10 @@ Some notable features:
 - Chromecast support
 - Browse and play media over the network
 
-And many more on the way!
 
 ## Install
 
-The recommended way to install Screenbox is through the [Microsoft Store](https://www.microsoft.com/store/apps/9NTSNMSVCB5L). Installing through the store ensures the app stays up to date automatically. You don't need a Microsoft account to download apps from the store. The app can also be installed through winget using the following command.
-
-```shell
-winget install screenbox -s winget
-```
+Screenbox Enhanced is not on the Microsoft Store. Build it from source as described below. A sideload package is also attached to each run of the repository's build workflow.
 
 ## Contribute
 
@@ -62,7 +56,7 @@ Feel free to open an issue if you want to report a bug, give feedback, or ask a 
 ### Quick Start for Developers
 
 1. **Prerequisites**: Visual Studio 2026 with UWP development workload
-2. **Clone**: `git clone https://github.com/huynhsontung/Screenbox.git`
+2. **Clone**: `git clone https://github.com/KayTwoOne/ScreenboxEnhanced.git`
 3. **Build**: Open `Screenbox.slnx` and build the solution (Ctrl+Shift+B)
 4. **Run**: Set platform to x64 and start debugging (F5)
 
@@ -72,7 +66,7 @@ See the [Contributing Guide](CONTRIBUTING.md) for detailed setup instructions.
 
 [![Crowdin](https://badges.crowdin.net/screenbox/localized.svg)](https://crowdin.com/project/screenbox)
 
-Help translate the app to your language on [Crowdin](https://crowdin.com/project/screenbox)! Crowdin offers an intuitive UX for you to get started and is the recommended tool for localization. Translations are automatically synced to GitHub and published in the next minor update.
+Translations come from the original Screenbox project. Help translate it on [Crowdin](https://crowdin.com/project/screenbox)! Crowdin offers an intuitive UX for you to get started and is the recommended tool for localization. Translations are automatically synced to GitHub and published in the next minor update.
 
 You can also translate the app locally without Crowdin. The project source language is English, United States. All localizable source files are in the `Screenbox\Strings\en-US` directory. Localizable file types are `.resw` and `.md`.
 

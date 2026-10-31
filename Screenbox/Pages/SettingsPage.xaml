@@ -800,7 +800,7 @@
 
                 <ctc:SettingsExpander
                     Margin="{StaticResource SettingsCardMargin}"
-                    Description="Made with ❤️ by Tung Huynh"
+                    Description="{x:Bind strings:Resources.AboutBasedOn}"
                     Header="{x:Bind strings:Resources.AppFriendlyName}"
                     HeaderIcon="{ui:BitmapIcon Source=ms-appx:///Assets/StoreLogo.png}">
                     <TextBlock
@@ -810,10 +810,19 @@
                     <ctc:SettingsExpander.Items>
                         <ctc:SettingsCard HorizontalContentAlignment="Left" ContentAlignment="Vertical">
                             <StackPanel Margin="{StaticResource HyperlinkButtonInlineMargin}" Orientation="Vertical">
-                                <HyperlinkButton Content="{x:Bind strings:Resources.PrivacyPolicy}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/PRIVACY.md" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.License}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/LICENSE" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.ThirdPartyNotices}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/NOTICE.md" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSourceCode}" NavigateUri="https://github.com/huynhsontung/Screenbox" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.PrivacyPolicy}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/PRIVACY.md" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.License}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/LICENSE" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.ThirdPartyNotices}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/NOTICE.md" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSourceCode}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkOriginalProject}" NavigateUri="https://github.com/huynhsontung/Screenbox" />
+                                <TextBlock
+                                    Margin="12,8,0,4"
+                                    MaxWidth="560"
+                                    HorizontalAlignment="Left"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind strings:Resources.AboutMetadataAttribution}"
+                                    TextWrapping="Wrap" />
                             </StackPanel>
                         </ctc:SettingsCard>
                     </ctc:SettingsExpander.Items>
@@ -824,8 +833,8 @@
                     Padding="{StaticResource HyperlinkButtonInlineMargin}"
                     Orientation="Vertical"
                     XYFocusKeyboardNavigation="Enabled">
-                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkDiscord}" NavigateUri="https://discord.gg/HZPZXjANxz" />
-                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSponsor}" NavigateUri="https://github.com/sponsors/huynhsontung" />
+                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkReportIssue}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/issues" />
+                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSupportOriginalAuthor}" NavigateUri="https://github.com/sponsors/huynhsontung" />
                     <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkTranslate}" NavigateUri="https://crowdin.com/project/screenbox" />
                 </StackPanel>
 
