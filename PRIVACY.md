@@ -23,6 +23,6 @@ When it is on, a lookup works as follows:
 - **Poster images** are downloaded over HTTPS from the address the service returns, and saved locally.
 - **Your TMDB API key** is stored in the app's local settings on your device. It is sent only to TMDB, and it is never logged.
 
-Each service's own privacy policy governs what it does with the requests it receives. You can turn the feature off at any time. Already-downloaded posters and titles stay on your device until you change or remove them.
+Each service's own privacy policy governs what it does with the requests it receives. You can turn the feature off at any time. Already-downloaded posters, synopses and release years stay on your device until you change or remove them. A lookup never renames your folders: the names you see are always your own.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB.

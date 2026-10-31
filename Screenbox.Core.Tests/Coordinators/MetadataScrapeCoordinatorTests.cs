@@ -295,26 +295,71 @@ public sealed class MetadataScrapeCoordinatorTests
     }
 
     // ------------------------------------------------------------------
-    // folder_metadata guard - fills blanks, never clobbers a user's choice.
+    // folder_metadata guard - a scrape never writes the user's title and never clobbers a poster
+    // choice. custom_title is durable user data (the Edit folder dialog writes it, and nothing
+    // distinguishes a scraped value from a typed one), so the coordinator does not touch it at all.
     // ------------------------------------------------------------------
 
     [Test]
-    public async Task ScrapeFolderAsync_NoExistingTitle_FillsCustomTitleFromTheMatch()
+    public async Task ScrapeFolderAsync_NoExistingTitle_LeavesCustomTitleUntouched()
     {
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
         const string path = @"D:\Anime\Dan Da Dan";
 
+        // The provider's title differs from the folder name in the ways real ones do: stylised
+        // capitals and a trailing full stop. Writing it into custom_title would turn a lookup into
+        // a permanent rename the user never asked for.
         var provider = new FakeMetadataProvider("anilist",
-            [new MetadataMatch("1", "Dan Da Dan", "synopsis", 2024, "https://example.com/poster.jpg")]);
+            [new MetadataMatch("1", "DAN DA DAN.", "synopsis", 2024, "https://example.com/poster.jpg")]);
         var settings = new TestSettingsService { MetadataEnabled = true };
         var coordinator = CreateCoordinator(settings, new FakeMetadataProviderFactory(provider), db);
 
-        await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
+        MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
+
+        await Assert.That(result).IsNotNull()
+            .Because("The scrape must genuinely have matched, otherwise an untouched title proves nothing.");
 
         FolderMetadataDto? metadata = await db.LoadFolderMetadataAsync(path);
-        await Assert.That(metadata).IsNotNull();
-        await Assert.That(metadata!.CustomTitle).IsEqualTo("Dan Da Dan");
+        await Assert.That(metadata?.CustomTitle).IsNull();
+
+        // What a scrape does keep lives in the disposable cache, where cache data belongs.
+        FolderScrapeCacheDto? cache = await db.LoadScrapeCacheAsync(path);
+        await Assert.That(cache).IsNotNull();
+        await Assert.That(cache!.Synopsis).IsEqualTo("synopsis");
+        await Assert.That(cache.Year).IsEqualTo(2024);
+    }
+
+    [Test]
+    public async Task ScrapeFolderAsync_SeasonFolderSearchedViaParent_KeepsItsOwnNameButReceivesThePoster()
+    {
+        // "Season 1" has no searchable name of its own, so it is searched under its parent's name.
+        // The series result must reach the season folder only as artwork - never as a title, or
+        // Season 1, Season 2 and Season 3 all end up renamed to the series and indistinguishable.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Jujutsu Kaisen\Season 1";
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("1", "JUJUTSU KAISEN", "synopsis", 2020, "https://example.com/jjk.jpg")]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, "Season 1", CancellationToken.None);
+
+        await Assert.That(result).IsNotNull();
+        await Assert.That(provider.LastQuery).IsEqualTo("Jujutsu Kaisen")
+            .Because("A bare season folder is still searched, under its parent's name.");
+        await Assert.That(artwork.LastFolderPath).IsEqualTo(path)
+            .Because("The season folder may still receive the series poster.");
+        await Assert.That(artwork.LastPosterUrl).IsEqualTo("https://example.com/jjk.jpg");
+
+        FolderMetadataDto? metadata = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(metadata?.CustomTitle).IsNull()
+            .Because("The season folder keeps its own name; the series title is never written into it.");
     }
 
     [Test]
@@ -350,6 +395,14 @@ public sealed class MetadataScrapeCoordinatorTests
         await Assert.That(result).IsNotNull().Because("The scrape itself must still succeed and be cached.");
         await Assert.That(result!.PosterUrl).IsNotNull()
             .Because("The guard this test exercises only matters when a scrape genuinely found a poster to (almost) act on.");
+
+        // The poster half of this test cannot be proven by the row alone: with the Manual guard
+        // deleted, the download to this placeholder URL simply fails, the row is never written, and
+        // the persisted assertions below pass anyway. Whether the guard actually fired is visible
+        // from whether anything network-capable came into existence - it is only created on the way
+        // to a download, which the guard exists to prevent.
+        await Assert.That(artworkService.HasCreatedHttpClient).IsFalse()
+            .Because("A folder with a Manual poster must be refused before any download is attempted.");
 
         // The assertion that matters: read the persisted row back from the database, not from
         // ArtworkResolver or any other reader. A resolver's read-time precedence cannot protect

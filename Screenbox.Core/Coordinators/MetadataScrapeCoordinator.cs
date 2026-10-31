@@ -60,6 +60,13 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     /// so both <see cref="ScrapeFolderAsync"/> and <see cref="ScrapeLibraryAsync"/> apply artwork the
     /// same way - a cached reconstruction never carries a poster URL, so that branch never reaches
     /// this step.
+    /// <para>
+    /// A scrape never writes the folder's title. <c>custom_title</c> is user data; the scraped
+    /// synopsis and year are cache data and stay in <c>folder_scrape_cache</c>. The provider's title
+    /// is not persisted at all - that table has no title column (see
+    /// <see cref="BuildMatchFromCacheAsync"/>). The poster is the only thing a scrape ever applies
+    /// to a folder.
+    /// </para>
     /// </summary>
     private async Task<(MetadataMatch? Match, bool HitNetwork)> ScrapeFolderCoreAsync(
         string folderPath, string folderName, CancellationToken ct)
@@ -114,8 +121,14 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             LastScraped = DateTimeOffset.UtcNow
         });
 
-        await FillBlankTitleAsync(folderPath, accepted.Title);
-
+        // Deliberately NO title write. folder_metadata.custom_title is durable user data - it is what
+        // the Edit folder dialog writes, and nothing distinguishes a scraped value from a typed one -
+        // so copying a provider's title into it would turn a lookup into a permanent rename the user
+        // never asked for (and the provider's title is often oddly styled or simply the wrong show).
+        // The folder names in a library are already the names the user chose.
+        //
+        // The only folder_metadata write a scrape causes is the poster, and that goes through
+        // IArtworkService, which carries its own Manual-source guard.
         if (accepted.PosterUrl is { Length: > 0 } posterUrl)
         {
             // Guarded internally by IArtworkService: a folder whose poster source is already
@@ -242,7 +255,9 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         }
 
         // "Season 1" and similar organizational folders normalize to empty - fall back to the
-        // parent folder's name, which is the actual series (e.g. "Jujutsu Kaisen\Season 1").
+        // parent folder's name, which is the actual series (e.g. "Jujutsu Kaisen\Season 1"). This
+        // fallback is for SEARCHING only: the season folder keeps its own name, and receives the
+        // series result as a poster at most.
         string parentDirectory = Path.GetDirectoryName(TrimTrailingSeparators(folderPath)) ?? string.Empty;
         string parentName = GetLastSegment(parentDirectory);
 
@@ -266,10 +281,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             return null;
         }
 
-        // The cache does not store the matched title (only the provider id and the fields the
-        // provider itself returned) - the title lives in folder_metadata, since a successful scrape
-        // writes it there via FillBlankTitleAsync. Reading it back keeps this reconstruction honest
-        // even when the user has since renamed the folder display via a custom title of their own.
+        // The cache does not store the provider's title - only the provider id and the other fields
+        // it returned - and a scrape no longer writes a title anywhere else. So a reconstructed
+        // match cannot carry the provider's canonical title. It carries the folder's own custom
+        // title when the user has set one (the best display name available), and the provider id
+        // otherwise. Callers must not treat Title as what the provider called the series.
         FolderMetadataDto? metadata = await _databaseService.LoadFolderMetadataAsync(folderPath);
         string title = !string.IsNullOrWhiteSpace(metadata?.CustomTitle) ? metadata!.CustomTitle! : cache.ProviderId;
         double confidence = string.IsNullOrEmpty(query) ? 0 : MetadataMatchScorer.Score(query, title);
@@ -283,34 +299,4 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             Path = folderPath,
             LastScraped = DateTimeOffset.UtcNow
         });
-
-    /// <summary>
-    /// Fills the folder's display title from a scrape, but only when the user has never set one.
-    /// This is the guard that keeps a scrape from clobbering a custom title - and it is the ONLY
-    /// <c>folder_metadata</c> write this coordinator performs directly: it never touches
-    /// <c>poster_file</c> or <c>poster_source</c> itself. Those columns are written, if at all, by
-    /// <see cref="IArtworkService.SetScrapedPosterAsync"/> immediately after this call returns, which
-    /// carries its own independent Manual-source guard - so a manual (or any other source's) poster
-    /// survives a scrape untouched no matter what happens to the title.
-    /// <see cref="IDatabaseService.SetFolderCustomTitleAsync"/> is a single-column writer for
-    /// exactly this reason - unlike <see cref="IDatabaseService.SaveFolderMetadataAsync"/>, it
-    /// cannot clobber a column this coordinator does not own.
-    /// </summary>
-    private async Task FillBlankTitleAsync(string folderPath, string matchedTitle)
-    {
-        if (string.IsNullOrWhiteSpace(matchedTitle))
-        {
-            return;
-        }
-
-        FolderMetadataDto? existing = await _databaseService.LoadFolderMetadataAsync(folderPath);
-        if (existing is { CustomTitle.Length: > 0 })
-        {
-            // The user already named this folder themselves - a scrape fills blanks, it never
-            // clobbers a choice.
-            return;
-        }
-
-        await _databaseService.SetFolderCustomTitleAsync(folderPath, matchedTitle);
-    }
 }

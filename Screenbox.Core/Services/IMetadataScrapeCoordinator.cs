@@ -23,16 +23,21 @@ public interface IMetadataScrapeCoordinator
     /// acceptance threshold - a confident wrong match is worse than no match, so a weak result is
     /// reported as no match rather than guessed at.
     /// <para>
-    /// When a fresh (uncached) match carries a poster URL, this also downloads and stores that
-    /// poster as the folder's artwork, subject to <see cref="IArtworkService"/>'s own guarantee that
-    /// a <see cref="Enums.PosterSource.Manual"/> poster is never displaced.
+    /// The only thing a scrape ever applies to a folder is its poster: when a fresh (uncached) match
+    /// carries a poster URL, this downloads and stores it as the folder's artwork, subject to
+    /// <see cref="IArtworkService"/>'s own guarantee that a <see cref="Enums.PosterSource.Manual"/>
+    /// poster is never displaced. A scrape NEVER writes the folder's title: the custom title is
+    /// user data, indistinguishable from one the user typed, and the folder names in a library are
+    /// already the names the user chose. The matched synopsis and year are kept in the scrape cache;
+    /// the provider's title is not persisted.
     /// </para>
     /// </summary>
     /// <param name="folderPath">Absolute path of the folder; the cache and metadata key.</param>
     /// <param name="folderName">
     /// The folder's own name. A bare organizational folder (e.g. "Season 1") normalizes to an empty
     /// search query, in which case the parent folder's name - derived from
-    /// <paramref name="folderPath"/> - is used instead.
+    /// <paramref name="folderPath"/> - is searched instead. That fallback is for searching only:
+    /// the folder keeps its own name and may receive the series poster, nothing more.
     /// </param>
     Task<MetadataMatch?> ScrapeFolderAsync(string folderPath, string folderName, CancellationToken ct);
 
