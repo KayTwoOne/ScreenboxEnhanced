@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="far" x1="0" y1="4" x2="0" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE08A"/>
+      <stop offset="1" stop-color="#FFC547"/>
+    </linearGradient>
+    <linearGradient id="near" x1="0" y1="10" x2="0" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFB64F"/>
+      <stop offset="1" stop-color="#FF9933"/>
+    </linearGradient>
+    <linearGradient id="front" x1="0" y1="46" x2="0" y2="252" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF8A5C"/>
+      <stop offset="0.5" stop-color="#FF6D45"/>
+      <stop offset="0.5" stop-color="#EE4E31"/>
+      <stop offset="1" stop-color="#D63A22"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="46" x2="0" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="frontClip"><rect x="4" y="46" width="248" height="206" rx="44"/></clipPath>
+    <!-- Shadows may only fall on the layers behind, never outside the mark: on a light
+         taskbar an unclipped blur shows as a grey halo around the icon. -->
+    <clipPath id="behindFront"><rect x="22" y="24" width="212" height="100" rx="34"/><rect x="44" y="4" width="168" height="100" rx="26"/></clipPath>
+    <clipPath id="behindNear"><rect x="44" y="4" width="168" height="100" rx="26"/></clipPath>
+    <filter id="ambient" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+    <filter id="glyph" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="4"/></filter>
+  </defs>
+  <rect x="44" y="4" width="168" height="100" rx="26" fill="url(#far)"/>
+  <rect x="22" y="22" width="212" height="100" rx="34" fill="#6B2A05" opacity="0.30"
+        filter="url(#ambient)" clip-path="url(#behindNear)"/>
+  <rect x="22" y="24" width="212" height="100" rx="34" fill="url(#near)"/>
+  <rect x="4" y="44" width="248" height="206" rx="44" fill="#5A1405" opacity="0.32" filter="url(#ambient)" clip-path="url(#behindFront)"/>
+  <!-- the screen: two tones split at the horizon, as in the original mark -->
+  <rect x="4" y="46" width="248" height="206" rx="44" fill="url(#front)"/>
+  <rect x="4" y="46" width="248" height="60" fill="url(#sheen)" clip-path="url(#frontClip)"/>
+  <polygon points="113.3,117 113.3,189 175.3,153" fill="#7A1A0A" opacity="0.28" stroke="#7A1A0A" stroke-width="20" stroke-linejoin="round" filter="url(#glyph)"/>
+  <polygon points="113.3,113 113.3,185 175.3,149" fill="#FFF8F1" stroke="#FFF8F1" stroke-width="20" stroke-linejoin="round"/>
+</svg>
