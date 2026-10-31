@@ -285,4 +285,78 @@ public sealed class WatchStateContextTests
         await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
         await Assert.That(context.IsLoaded).IsTrue();
     }
+
+    [Test]
+    public async Task RefreshAsync_UpdatesContinueWatchingOnTheCallersContext()
+    {
+        // ContinueWatching is bound to the Home page, whose IsNullOrEmptyStateTrigger touches XAML
+        // when the collection changes. Changing it from a background thread throws 0x8001010E
+        // ("marshalled for a different thread"). By then the item is already in the collection, so
+        // the row stayed blank until the page was rebuilt: Continue Watching empty on every cold
+        // launch, populated on the next visit.
+        //
+        // The cause was a ConfigureAwait(false) on the file lookup. When a task completes on a
+        // thread that has a UI context, .NET does not run a ConfigureAwait(false) continuation
+        // inline there - it queues it to the thread pool, and everything after it ran off the UI
+        // thread. The lookup here is forced to complete asynchronously, from the thread pool:
+        // a local temp file resolves synchronously in the test host, which hid this the first time.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        string filePath = Path.Combine(fixture.DirectoryPath, "Episode 1.mkv");
+        await File.WriteAllTextAsync(filePath, "x");
+        await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance)
+        {
+            ResolveFileAsync = async path =>
+            {
+                await Task.Delay(20).ConfigureAwait(false);
+                return await StorageFile.GetFileFromPathAsync(path);
+            }
+        };
+
+        var uiContext = new MarkerSynchronizationContext();
+        SynchronizationContext? observed = null;
+        bool changed = false;
+        context.ContinueWatching.CollectionChanged += (_, _) =>
+        {
+            changed = true;
+            observed = SynchronizationContext.Current;
+        };
+
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(uiContext);
+        try
+        {
+            await context.RefreshAsync(25);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await Assert.That(changed).IsTrue();
+        await Assert.That(ReferenceEquals(observed, uiContext)).IsTrue();
+    }
+
+    /// <summary>
+    /// Stands in for the UI thread's context: runs posted continuations on the thread pool with
+    /// itself installed as current, so code that resumes on its caller's context can be told
+    /// apart from code that does not.
+    /// </summary>
+    private sealed class MarkerSynchronizationContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) =>
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                SetSynchronizationContext(this);
+                try
+                {
+                    d(state);
+                }
+                finally
+                {
+                    SetSynchronizationContext(null);
+                }
+            });
+    }
 }

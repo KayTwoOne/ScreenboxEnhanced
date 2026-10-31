@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.Extensions.Logging;
@@ -49,6 +50,12 @@ public sealed partial class WatchStateContext : ObservableObject
     /// </summary>
     private readonly Dictionary<string, MediaViewModel> _mediaByLocation = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Resolves a stored location to a file. A seam for tests only: they need a lookup that
+    /// completes genuinely asynchronously, which a local temp file does not reliably do.
+    /// </summary>
+    internal Func<string, Task<StorageFile?>> ResolveFileAsync { get; init; } = FilesHelpers.TryGetFileFromPathAsync;
+
     public WatchStateContext(
         IWatchStateService watchStateService,
         MediaViewModelFactory mediaFactory,
@@ -84,25 +91,43 @@ public sealed partial class WatchStateContext : ObservableObject
 
             IReadOnlyList<WatchStateDto> states = _watchStateService.GetContinueWatching(limit);
 
-            foreach (WatchStateDto state in states)
+            // Always re-verify each file still resolves, even for a location already in the
+            // cache: the cache exists to reuse the ViewModel INSTANCE (so a tile doesn't reload its
+            // thumbnail every refresh), not to skip the existence check. Without this, a file
+            // deleted after its first successful refresh would keep showing a stale tile forever.
+            //
+            // Resolve with the original (un-normalized) location: StorageFile.GetFileFromPathAsync
+            // respects UWP's granted scopes, and the upper-invariant key can fail to resolve even
+            // when the file exists under its original casing. Rows written before the
+            // original_location column existed fall back to the normalized location.
+            //
+            // The lookups run concurrently and off the UI thread, but the WhenAll below resumes on
+            // the caller's context (ConfigureAwait(true)) before anything touches a MediaViewModel
+            // or ContinueWatching. Both are bound to the Home page, and changing them from a
+            // background thread throws 0x8001010E from the page's state trigger. That left Continue
+            // Watching blank on every cold launch until the page was next rebuilt.
+            (WatchStateDto State, StorageFile? File)[] lookups = await Task.WhenAll(states.Select(async state =>
             {
+                string pathForResolution = state.OriginalLocation ?? state.Location;
                 try
                 {
-                    // Always re-verify the file still resolves, even for a location already in
-                    // the cache: the cache exists to reuse the ViewModel INSTANCE (so a tile
-                    // doesn't reload its thumbnail every refresh), not to skip the existence
-                    // check. Without this, a file deleted after its first successful refresh
-                    // would keep showing a stale, never-re-checked tile forever.
-                    // Use the original (un-normalized) location for file resolution, since
-                    // StorageFile.GetFileFromPathAsync is case-sensitive and respects UWP's
-                    // granted scopes. Locations are normalized to uppercase for the cache/database
-                    // key, but the uppercase path may fail even when the file exists under its
-                    // original casing. Fall back to the normalized location for rows written
-                    // before the original_location column was added.
-                    string pathForResolution = state.OriginalLocation ?? state.Location;
-                    StorageFile? file = await FilesHelpers.TryGetFileFromPathAsync(pathForResolution).ConfigureAwait(false);
-                    if (file == null) continue;
+                    StorageFile? file = await ResolveFileAsync(pathForResolution).ConfigureAwait(false);
+                    return (state, file);
+                }
+                catch (Exception e)
+                {
+                    // One unresolvable entry must not abort the whole refresh.
+                    _logger.LogError(e, "Failed to resolve continue-watching item for '{Location}'.", state.Location);
+                    return (state, (StorageFile?)null);
+                }
+            })).ConfigureAwait(true);
 
+            foreach ((WatchStateDto state, StorageFile? file) in lookups)
+            {
+                if (file is null) continue;
+
+                try
+                {
                     if (!_mediaByLocation.TryGetValue(state.Location, out MediaViewModel? media))
                     {
                         media = _mediaFactory.GetOrCreate(file);
@@ -114,9 +139,9 @@ public sealed partial class WatchStateContext : ObservableObject
                 }
                 catch (Exception e)
                 {
-                    // Defensive: a single bad entry (e.g. an inaccessible file) must not abort
-                    // the whole refresh or escape into a caller reached from an async void page
-                    // handler, where an unhandled exception terminates the app with no crash log.
+                    // Defensive: a single bad entry must not abort the whole refresh or escape into
+                    // a caller reached from an async void page handler, where an unhandled
+                    // exception terminates the app with no crash log.
                     _logger.LogError(e, "Failed to resolve continue-watching item for '{Location}'.", state.Location);
                 }
             }
