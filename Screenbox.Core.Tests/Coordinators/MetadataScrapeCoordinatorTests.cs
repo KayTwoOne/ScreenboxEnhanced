@@ -363,6 +363,88 @@ public sealed class MetadataScrapeCoordinatorTests
     }
 
     [Test]
+    public async Task ScrapeFolderAsync_SpecialsFolder_MakesNoProviderCallAndRecordsNothing()
+    {
+        // A specials folder is not a series, and SeriesNameNormalizer says so by normalizing it to
+        // empty. Falling back to the parent's name for it would apply the parent series' result to
+        // a folder that is not that series. The provider is primed with a perfect match for the
+        // parent so a fall-back to the parent name could not go unnoticed.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("1", "Jujutsu Kaisen", "synopsis", 2020, "https://example.com/jjk.jpg")]);
+        var factory = new FakeMetadataProviderFactory(provider);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            factory, settings, db, artwork, NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        foreach (string name in new[] { "NCOP & NCED", "Extras", "Specials", "NCOP", "NCED", "OAD", "OVA", "Bonus" })
+        {
+            string path = @"D:\Anime\Jujutsu Kaisen\" + name;
+
+            MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, name, CancellationToken.None);
+
+            await Assert.That(result).IsNull();
+            await Assert.That(await db.LoadScrapeCacheAsync(path)).IsNull()
+                .Because($"'{name}' must not even be recorded as a no-match: nothing about it was checked.");
+        }
+
+        await Assert.That(provider.CallCount).IsEqualTo(0);
+        await Assert.That(factory.ConstructionCount).IsEqualTo(0)
+            .Because("Not even a provider lookup - the factory is where providers are constructed.");
+        await Assert.That(artwork.SetScrapedPosterCallCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ScrapeFolderAsync_SpecialsFolderWithLeftoverCacheRow_IsStillNotScraped()
+    {
+        // An earlier build did fall back to the parent for specials folders, so a library scanned
+        // by it holds a matched cache row for "NCOP & NCED". That row must not resurface as a match
+        // for a folder that is not a series.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Jujutsu Kaisen\NCOP & NCED";
+
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = path, Provider = "anilist", ProviderId = "113415", Synopsis = "x", LastScraped = DateTimeOffset.UtcNow
+        });
+
+        var provider = new FakeMetadataProvider("anilist");
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var coordinator = CreateCoordinator(settings, new FakeMetadataProviderFactory(provider), db);
+
+        MetadataMatch? result = await coordinator.ScrapeFolderAsync(path, "NCOP & NCED", CancellationToken.None);
+
+        await Assert.That(result).IsNull();
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_SkipsSpecialsFoldersButStillScrapesTheirSiblings()
+    {
+        // The whole-library path reaches the same gate: the name it passes down is the last path
+        // segment, so a specials subfolder is skipped while the season beside it is still searched.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string specialsPath = @"D:\Anime\Jujutsu Kaisen\NCOP & NCED";
+        const string seasonPath = @"D:\Anime\Jujutsu Kaisen\Season 1";
+        await db.SetFolderCustomTitleAsync(specialsPath, null);
+        await db.SetFolderCustomTitleAsync(seasonPath, null);
+
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("1", "Jujutsu Kaisen", null, null, null)]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var coordinator = CreateCoordinator(settings, new FakeMetadataProviderFactory(provider), db);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(1);
+        await Assert.That(await db.LoadScrapeCacheAsync(specialsPath)).IsNull();
+        await Assert.That(await db.LoadScrapeCacheAsync(seasonPath)).IsNotNull();
+    }
+
+    [Test]
     public async Task ScrapeFolderAsync_NeverOverwritesAManualPosterOrCustomTitle()
     {
         // folder_metadata is durable user data. A scrape may fill blanks, never clobber choices.

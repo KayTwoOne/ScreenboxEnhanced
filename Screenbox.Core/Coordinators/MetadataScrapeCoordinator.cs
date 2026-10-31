@@ -54,12 +54,12 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     /// <summary>
     /// Does the actual work behind <see cref="ScrapeFolderAsync"/>, additionally reporting whether
     /// this call reached a provider over the network (as opposed to short-circuiting from the scrape
-    /// cache, the disabled gate, or an empty query) - <see cref="ScrapeLibraryAsync"/> needs that bit
-    /// to know whether the inter-folder throttle applies. This is also the single place a fresh
-    /// match's poster is downloaded and stored (via <see cref="IArtworkService.SetScrapedPosterAsync"/>),
-    /// so both <see cref="ScrapeFolderAsync"/> and <see cref="ScrapeLibraryAsync"/> apply artwork the
-    /// same way - a cached reconstruction never carries a poster URL, so that branch never reaches
-    /// this step.
+    /// cache, the disabled gate, a specials folder, or an empty query) - <see cref="ScrapeLibraryAsync"/>
+    /// needs that bit to know whether the inter-folder throttle applies. This is also the single
+    /// place a fresh match's poster is downloaded and stored (via
+    /// <see cref="IArtworkService.SetScrapedPosterAsync"/>), so both <see cref="ScrapeFolderAsync"/>
+    /// and <see cref="ScrapeLibraryAsync"/> apply artwork the same way - a cached reconstruction
+    /// never carries a poster URL, so that branch never reaches this step.
     /// <para>
     /// A scrape never writes the folder's title. <c>custom_title</c> is user data; the scraped
     /// synopsis and year are cache data and stay in <c>folder_scrape_cache</c>. The provider's title
@@ -79,6 +79,16 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             return (null, false);
         }
 
+        // A specials folder (Extras, NCOP & NCED, ...) is not a series, so there is nothing to look
+        // up for it. It must be turned away here, before anything else: before the parent-name
+        // fallback in ResolveQuery (which would hand it the parent series' result), and before the
+        // cache read (so a row left by an older build cannot resurface as a match). Nothing is
+        // recorded either - not even a no-match - because nothing about the folder was checked.
+        if (SeriesNameNormalizer.IsNonSeriesFolder(folderName))
+        {
+            return (null, false);
+        }
+
         string query = ResolveQuery(folderPath, folderName);
 
         FolderScrapeCacheDto? cached = await _databaseService.LoadScrapeCacheAsync(folderPath);
@@ -91,7 +101,8 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 
         if (string.IsNullOrEmpty(query))
         {
-            // A bare season/specials folder whose parent yielded nothing searchable either.
+            // A bare season folder whose parent yielded nothing searchable either (e.g. a season
+            // folder sitting directly under a library root).
             await SaveNoMatchAsync(folderPath);
             return (null, false);
         }
@@ -254,10 +265,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             return query;
         }
 
-        // "Season 1" and similar organizational folders normalize to empty - fall back to the
+        // A bare season folder ("Season 1", "2nd Season") normalizes to empty - fall back to the
         // parent folder's name, which is the actual series (e.g. "Jujutsu Kaisen\Season 1"). This
         // fallback is for SEARCHING only: the season folder keeps its own name, and receives the
-        // series result as a poster at most.
+        // series result as a poster at most. A specials folder never gets here - the caller has
+        // already turned it away, because it is not part of any series.
         string parentDirectory = Path.GetDirectoryName(TrimTrailingSeparators(folderPath)) ?? string.Empty;
         string parentName = GetLastSegment(parentDirectory);
 

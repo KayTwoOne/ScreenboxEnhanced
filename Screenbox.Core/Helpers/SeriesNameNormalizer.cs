@@ -13,8 +13,9 @@ namespace Screenbox.Core.Helpers;
 public static partial class SeriesNameNormalizer
 {
     // Folders that are organizational, not a series in their own right. Searching a provider
-    // for one of these would return nothing useful (or something actively misleading), so the
-    // caller should fall back to the parent folder name instead.
+    // for one of these would return nothing useful (or something actively misleading), and the
+    // parent series' result must not be applied to them either: they are not scraped at all.
+    // This is the one list of them - EpisodeInfoParser classifies specials through it too.
     private static readonly string[] NonSeriesFolderNames =
         ["extras", "specials", "ncop & nced", "ncop", "nced", "oad", "ova", "bonus"];
 
@@ -35,8 +36,11 @@ public static partial class SeriesNameNormalizer
 
     /// <summary>
     /// Normalizes a folder name into a search query. Returns an empty string when the folder
-    /// is not itself a searchable series - a bare season folder or a specials folder - in which
-    /// case the caller should fall back to the parent folder name.
+    /// is not itself a searchable series - a bare season folder or a specials folder. The two
+    /// look identical here but mean different things: a bare season folder belongs to the series
+    /// named by its parent, so a caller may search under the parent's name, whereas a specials
+    /// folder (<see cref="IsNonSeriesFolder"/>) is not part of any series and must not be
+    /// searched at all.
     /// </summary>
     public static string Normalize(string folderName)
     {
@@ -45,9 +49,9 @@ public static partial class SeriesNameNormalizer
             return string.Empty;
         }
 
-        string collapsed = WhitespaceRegex().Replace(folderName.Trim(), " ");
+        string collapsed = CollapseWhitespace(folderName);
 
-        if (IsNonSeriesFolder(collapsed))
+        if (IsNonSeriesName(collapsed))
         {
             return string.Empty;
         }
@@ -55,6 +59,18 @@ public static partial class SeriesNameNormalizer
         return SeasonSuffixRegex().Replace(collapsed, string.Empty).Trim();
     }
 
-    private static bool IsNonSeriesFolder(string name) =>
-        NonSeriesFolderNames.Contains(name.ToLowerInvariant());
+    /// <summary>
+    /// True when the folder is organizational rather than a series or a season of one: a specials
+    /// folder such as <c>Extras</c> or <c>NCOP &amp; NCED</c>. <see cref="Normalize"/> returns an
+    /// empty string for these, exactly as it does for a bare <c>Season 1</c> folder, so an empty
+    /// query cannot distinguish them - this can. Matching ignores case and stray whitespace.
+    /// </summary>
+    public static bool IsNonSeriesFolder(string? folderName) =>
+        !string.IsNullOrWhiteSpace(folderName) && IsNonSeriesName(CollapseWhitespace(folderName));
+
+    private static string CollapseWhitespace(string name) =>
+        WhitespaceRegex().Replace(name.Trim(), " ");
+
+    private static bool IsNonSeriesName(string collapsedName) =>
+        NonSeriesFolderNames.Contains(collapsedName.ToLowerInvariant());
 }

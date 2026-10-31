@@ -19,9 +19,9 @@ public interface IMetadataScrapeCoordinator
     /// <summary>
     /// Scrapes online metadata for a single library folder, using a cached result when one exists
     /// instead of calling a provider again. Returns <see langword="null"/> when the feature is
-    /// disabled, the folder yields no searchable query, or no provider candidate clears the
-    /// acceptance threshold - a confident wrong match is worse than no match, so a weak result is
-    /// reported as no match rather than guessed at.
+    /// disabled, the folder is a specials folder, the folder yields no searchable query, or no
+    /// provider candidate clears the acceptance threshold - a confident wrong match is worse than
+    /// no match, so a weak result is reported as no match rather than guessed at.
     /// <para>
     /// The only thing a scrape ever applies to a folder is its poster: when a fresh (uncached) match
     /// carries a poster URL, this downloads and stores it as the folder's artwork, subject to
@@ -34,10 +34,12 @@ public interface IMetadataScrapeCoordinator
     /// </summary>
     /// <param name="folderPath">Absolute path of the folder; the cache and metadata key.</param>
     /// <param name="folderName">
-    /// The folder's own name. A bare organizational folder (e.g. "Season 1") normalizes to an empty
-    /// search query, in which case the parent folder's name - derived from
-    /// <paramref name="folderPath"/> - is searched instead. That fallback is for searching only:
-    /// the folder keeps its own name and may receive the series poster, nothing more.
+    /// The folder's own name. A specials folder (e.g. "Extras", "NCOP &amp; NCED") is not part of any
+    /// series and is not scraped at all: no provider is consulted and nothing is recorded. A bare
+    /// season folder (e.g. "Season 1") normalizes to an empty search query, in which case the parent
+    /// folder's name - derived from <paramref name="folderPath"/> - is searched instead. That
+    /// fallback is for searching only: the season folder keeps its own name and may receive the
+    /// series poster, nothing more.
     /// </param>
     Task<MetadataMatch?> ScrapeFolderAsync(string folderPath, string folderName, CancellationToken ct);
 

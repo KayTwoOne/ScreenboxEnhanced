@@ -77,6 +77,46 @@ public sealed class SeriesNameNormalizerTests
     }
 
     [Test]
+    public async Task IsNonSeriesFolder_EverySpecialsFolderName_IsTrue()
+    {
+        // The distinction Normalize collapses: both a specials folder and a bare season folder
+        // normalize to empty, but only the specials folder is not a series at all.
+        foreach (string folder in new[] { "NCOP & NCED", "Extras", "Specials", "NCOP", "NCED", "OAD", "OVA", "Bonus" })
+        {
+            await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder(folder)).IsTrue()
+                .Because($"'{folder}' is organizational, not a series.");
+        }
+    }
+
+    [Test]
+    public async Task IsNonSeriesFolder_IgnoresCaseAndStrayWhitespace()
+    {
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("  ncop  &  nced ")).IsTrue();
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("EXTRAS")).IsTrue();
+    }
+
+    [Test]
+    public async Task IsNonSeriesFolder_BareSeasonFolder_IsFalse()
+    {
+        // A season folder is part of a series: it may be searched via its parent. Calling it
+        // non-series would stop it ever receiving the series poster.
+        foreach (string folder in new[] { "Season 1", "Season 2", "2nd Season" })
+        {
+            await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder(folder)).IsFalse()
+                .Because($"'{folder}' normalizes to empty but belongs to a series.");
+        }
+    }
+
+    [Test]
+    public async Task IsNonSeriesFolder_OrdinarySeriesNameOrBlank_IsFalse()
+    {
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("Jujutsu Kaisen")).IsFalse();
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("Extras Of The Gods")).IsFalse();
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("")).IsFalse();
+        await Assert.That(SeriesNameNormalizer.IsNonSeriesFolder("   ")).IsFalse();
+    }
+
+    [Test]
     public async Task Normalize_EmptyInput_ReturnsEmpty()
     {
         await Assert.That(SeriesNameNormalizer.Normalize("")).IsEqualTo(string.Empty);

@@ -11,9 +11,6 @@ namespace Screenbox.Core.Helpers;
 /// </summary>
 public static partial class EpisodeInfoParser
 {
-    private static readonly string[] SpecialFolderNames =
-        ["extras", "specials", "ncop & nced", "ncop", "nced", "oad", "ova", "bonus"];
-
     private static readonly string[] SpecialMarkers =
         ["ncop", "nced", "oad", "ova", "special"];
 
@@ -114,9 +111,10 @@ public static partial class EpisodeInfoParser
         return Regex.Replace(stripped, @"\s+", " ", RegexOptions.CultureInvariant).Trim();
     }
 
+    // The list of specials folders lives in one place: SeriesNameNormalizer, which also decides
+    // that such a folder is never scraped. Keeping a second copy here invited the two to drift.
     private static bool IsSpecialFolder(string? folderName) =>
-        folderName is { Length: > 0 } &&
-        SpecialFolderNames.Contains(folderName.Trim().ToLowerInvariant());
+        SeriesNameNormalizer.IsNonSeriesFolder(folderName);
 
     private static bool HasSpecialMarker(string name)
     {
