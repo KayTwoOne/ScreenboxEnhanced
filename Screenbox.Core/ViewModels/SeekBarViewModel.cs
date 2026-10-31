@@ -67,6 +67,7 @@ public sealed partial class SeekBarViewModel :
     private readonly DispatcherQueueTimer _originalPositionTimer;
     private readonly IPlaybackProgressTracker _playbackProgressTracker;
     private readonly IWatchStateService _watchStateService;
+    private readonly WatchStateContext _watchStateContext;
     private readonly ILogger<SeekBarViewModel> _logger;
     private TimeSpan _originalPosition;
     private TimeSpan _lastTrackedPosition;
@@ -75,11 +76,13 @@ public sealed partial class SeekBarViewModel :
     private MediaViewModel? _currentItem;
 
     public SeekBarViewModel(ISettingsService settingsService, IPlaybackProgressTracker playbackProgressTracker,
-        IWatchStateService watchStateService, PlayerContext playerContext, ILogger<SeekBarViewModel> logger)
+        IWatchStateService watchStateService, WatchStateContext watchStateContext, PlayerContext playerContext,
+        ILogger<SeekBarViewModel> logger)
     {
         _settingsService = settingsService;
         _playbackProgressTracker = playbackProgressTracker;
         _watchStateService = watchStateService;
+        _watchStateContext = watchStateContext;
         _playerContext = playerContext;
         _logger = logger;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
@@ -464,33 +467,43 @@ public sealed partial class SeekBarViewModel :
         // Chapters.SyncItems(chapterList);
     }
 
-    private void UpdateProgress(TimeSpan position)
+    /// <remarks>
+    /// Runs on the UI thread: the seek bar's value-changed handler drives it. Internal rather than
+    /// private so a test can drive it without a XAML range-changed event, which cannot be constructed.
+    /// </remarks>
+    internal void UpdateProgress(TimeSpan position)
     {
+        MediaViewModel? item = _currentItem;
         if (!_settingsService.PersistPlaybackPosition ||
-            _currentItem == null || NaturalDuration <= TimeSpan.FromMinutes(1) ||
+            item == null || NaturalDuration <= TimeSpan.FromMinutes(1) ||
             DateTimeOffset.Now - _playbackProgressTracker.LastUpdated <= TimeSpan.FromSeconds(3))
             return;
 
         if (position > TimeSpan.FromSeconds(30) && position + TimeSpan.FromSeconds(10) < NaturalDuration)
         {
-            _playbackProgressTracker.UpdateProgress(_currentItem.Location, position);
-            _ = RecordWatchStateAsync(_currentItem.Location, position);
+            _playbackProgressTracker.UpdateProgress(item.Location, position);
+
+            // Hand over the item captured here, not _currentItem: by the time the write finishes
+            // the queue may have advanced, and the episode that needs refreshing is this one.
+            _ = RecordWatchStateAsync(item, position, NaturalDuration);
         }
         else if (position > TimeSpan.FromSeconds(5))
         {
-            _playbackProgressTracker.RemovePosition(_currentItem.Location);
+            _playbackProgressTracker.RemovePosition(item.Location);
         }
     }
 
-    private async Task RecordWatchStateAsync(string location, TimeSpan position)
+    private async Task RecordWatchStateAsync(MediaViewModel item, TimeSpan position, TimeSpan duration)
     {
         try
         {
-            await _watchStateService.RecordProgressAsync(location, position, NaturalDuration);
+            // No ConfigureAwait(false) here or in the context: the refresh that follows updates
+            // properties the page is bound to, and must resume on this (UI) thread.
+            await _watchStateContext.RecordProgressAsync(item, position, duration);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "Failed to record watch state for '{Location}'.", location);
+            _logger.LogError(e, "Failed to record watch state for '{Location}'.", item.Location);
         }
     }
 }

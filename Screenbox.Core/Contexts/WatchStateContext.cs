@@ -33,7 +33,14 @@ public sealed partial class WatchStateContext : ObservableObject
 
     private readonly IWatchStateService _watchStateService;
     private readonly MediaViewModelFactory _mediaFactory;
+    private readonly IFolderStatsService _folderStatsService;
     private readonly ILogger<WatchStateContext> _logger;
+
+    /// <summary>
+    /// The limit the list was last refreshed with. A change to one item's state refreshes the list
+    /// the same way the Home page asked for it, without the Home page's constant leaking in here.
+    /// </summary>
+    private int _continueWatchingLimit;
 
     /// <summary>
     /// Caches the resolved <see cref="MediaViewModel"/> for each location seen on a previous
@@ -59,10 +66,12 @@ public sealed partial class WatchStateContext : ObservableObject
     public WatchStateContext(
         IWatchStateService watchStateService,
         MediaViewModelFactory mediaFactory,
+        IFolderStatsService folderStatsService,
         ILogger<WatchStateContext> logger)
     {
         _watchStateService = watchStateService;
         _mediaFactory = mediaFactory;
+        _folderStatsService = folderStatsService;
         _logger = logger;
     }
 
@@ -77,6 +86,8 @@ public sealed partial class WatchStateContext : ObservableObject
     /// </summary>
     public async Task RefreshAsync(int limit)
     {
+        _continueWatchingLimit = limit;
+
         List<MediaViewModel> resolved = new();
         Dictionary<string, MediaViewModel> updatedCache = new(StringComparer.OrdinalIgnoreCase);
 
@@ -162,5 +173,62 @@ public sealed partial class WatchStateContext : ObservableObject
 
         ContinueWatching.SyncItems(resolved);
         IsLoaded = true;
+    }
+
+    /// <summary>
+    /// Records playback progress for <paramref name="media"/> and applies everything that follows
+    /// from it, so playback does not have to know what else is showing watch state.
+    /// <para>
+    /// This is the one place that reacts to an item's watch state changing, whatever changed it.
+    /// The reaction is: bring the item's own
+    /// <see cref="MediaViewModel.IsWatched"/> and <see cref="MediaViewModel.WatchProgress"/> up to
+    /// date; and, only when the item crossed between watched and unwatched, drop the cached folder
+    /// statistics (their unwatched counts) and refresh <see cref="ContinueWatching"/>. Progress
+    /// that merely moves a bar does neither - it is recorded every few seconds.
+    /// </para>
+    /// <para>
+    /// The caller passes the item it recorded rather than this method looking one up afterwards:
+    /// by the time a write finishes, the queue may already have moved on to the next episode.
+    /// Nothing after an await here uses <c>ConfigureAwait(false)</c>. The item's properties and
+    /// <see cref="ContinueWatching"/> are bound to the page, so the continuation must stay on the
+    /// caller's UI context - see <see cref="RefreshAsync"/> for the bug that cost.
+    /// </para>
+    /// </summary>
+    public async Task RecordProgressAsync(MediaViewModel media, TimeSpan position, TimeSpan duration)
+    {
+        bool wasWatched = _watchStateService.IsWatched(media.Location);
+        await _watchStateService.RecordProgressAsync(media.Location, position, duration);
+        await ReactToChangeAsync(media, wasWatched);
+    }
+
+    /// <summary>
+    /// Brings <paramref name="media"/> and everything derived from its watch state up to date after
+    /// a write. See <see cref="RecordProgressAsync"/> for what that comprises.
+    /// </summary>
+    private async Task ReactToChangeAsync(MediaViewModel media, bool wasWatched)
+    {
+        // The write has already succeeded and been persisted. Nothing that follows may turn that
+        // into a failure for the caller, which on the playback path is fire-and-forget.
+        try
+        {
+            media.RefreshWatchState(_watchStateService);
+
+            if (_watchStateService.IsWatched(media.Location) == wasWatched) return;
+
+            // After the write, not before: folder statistics are computed from the database, so
+            // dropping them early would let the next request cache the old answer again.
+            _folderStatsService.Invalidate();
+
+            // Nothing on screen to correct until the list has been loaded once; the Home page
+            // loads it itself.
+            if (IsLoaded)
+            {
+                await RefreshAsync(_continueWatchingLimit);
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to apply a watch state change for '{Location}'.", media.Location);
+        }
     }
 }

@@ -34,7 +34,7 @@ public sealed class WatchStateContextTests
     {
         using var fixture = new TestDirectoryFixture();
         WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await Assert.That(context.ContinueWatching).IsEmpty();
         await Assert.That(context.IsLoaded).IsFalse();
@@ -48,7 +48,7 @@ public sealed class WatchStateContextTests
         WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
         string missingFile = Path.Combine(fixture.DirectoryPath, "deleted-episode.mkv");
         await service.RecordProgressAsync(missingFile, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await context.RefreshAsync(25);
 
@@ -84,7 +84,7 @@ public sealed class WatchStateContextTests
             })
         };
         var mediaFactory = new MediaViewModelFactory(testPlayerService, playerContext, libraryContext);
-        var context = new WatchStateContext(service, mediaFactory, NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, mediaFactory, new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await context.RefreshAsync(25);
 
@@ -110,7 +110,7 @@ public sealed class WatchStateContextTests
         await service.RecordProgressAsync(finishedPath, TimeSpan.FromMinutes(19), duration);
         await service.RecordProgressAsync(newerPath, TimeSpan.FromMinutes(8), duration);
 
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
         await context.RefreshAsync(25);
 
         // Not asserting exact casing here (that is covered by the library-reuse test above);
@@ -135,7 +135,7 @@ public sealed class WatchStateContextTests
         string filePath = Path.Combine(fixture.DirectoryPath, "ep1.mkv");
         await File.WriteAllTextAsync(filePath, "x");
         await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await context.RefreshAsync(25);
         MediaViewModel first = context.ContinueWatching[0];
@@ -161,7 +161,7 @@ public sealed class WatchStateContextTests
         string filePath = Path.Combine(fixture.DirectoryPath, "ep1.mkv");
         await File.WriteAllTextAsync(filePath, "x");
         await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await context.RefreshAsync(25);
         await Assert.That(context.ContinueWatching.Count).IsEqualTo(1);
@@ -186,7 +186,7 @@ public sealed class WatchStateContextTests
             await service.RecordProgressAsync(path, TimeSpan.FromMinutes(5), duration);
         }
 
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
         await context.RefreshAsync(3);
 
         await Assert.That(context.ContinueWatching.Count).IsEqualTo(3);
@@ -208,7 +208,7 @@ public sealed class WatchStateContextTests
         // Record progress with the original-cased path.
         await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
 
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
         await context.RefreshAsync(25);
 
         // Should resolve successfully using the original casing.
@@ -245,7 +245,7 @@ public sealed class WatchStateContextTests
 
         var service = new WatchStateService(db, NullLogger<WatchStateService>.Instance);
         await service.LoadAsync();
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         await context.RefreshAsync(25);
 
@@ -276,7 +276,7 @@ public sealed class WatchStateContextTests
         await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
 
         // Create context with the service whose cache is still empty (LoadAsync not called).
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
 
         // RefreshAsync should load the cache automatically before querying it.
         await context.RefreshAsync(25);
@@ -305,7 +305,7 @@ public sealed class WatchStateContextTests
         string filePath = Path.Combine(fixture.DirectoryPath, "Episode 1.mkv");
         await File.WriteAllTextAsync(filePath, "x");
         await service.RecordProgressAsync(filePath, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
-        var context = new WatchStateContext(service, CreateMediaFactory(), NullLogger<WatchStateContext>.Instance)
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance)
         {
             ResolveFileAsync = async path =>
             {
@@ -336,6 +336,212 @@ public sealed class WatchStateContextTests
 
         await Assert.That(changed).IsTrue();
         await Assert.That(ReferenceEquals(observed, uiContext)).IsTrue();
+    }
+
+    // ------------------------------------------------------------------
+    // RecordProgressAsync: the one place that reacts to an item's watch state changing. Playback
+    // reports progress through it so the playing item, the folder statistics and Continue Watching
+    // all follow what the database now says.
+    // ------------------------------------------------------------------
+
+    private static readonly TimeSpan Episode = TimeSpan.FromMinutes(20);
+
+    private static MediaViewModel CreateMedia(string location) =>
+        new(new PlayerContext(), new TestPlayerService(), new Uri(location));
+
+    private static async Task<MediaViewModel> CreateMediaForFileAsync(string dir, string fileName)
+    {
+        string path = Path.Combine(dir, fileName);
+        await File.WriteAllTextAsync(path, "x");
+        StorageFile file = await StorageFile.GetFileFromPathAsync(path);
+        return new MediaViewModel(new PlayerContext(), new TestPlayerService(), file);
+    }
+
+    private static MediaViewModelFactory CreateLibraryFactory(params MediaViewModel[] videos)
+    {
+        var testPlayerService = new TestPlayerService();
+        var libraryContext = new LibraryContext { Videos = new VideosLibrary(new List<MediaViewModel>(videos)) };
+        return new MediaViewModelFactory(testPlayerService, new PlayerContext(), libraryContext);
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_RefreshesTheRecordedItemOnceItIsPastTheThreshold()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+        await Assert.That(media.IsWatched).IsFalse();
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(19), Episode);
+
+        await Assert.That(media.IsWatched).IsTrue()
+            .Because("The database now says watched, and the item on screen must follow without being rebuilt.");
+        await Assert.That(media.WatchProgress).IsEqualTo(1d);
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_RefreshesProgressOfAnUnfinishedItem()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var context = new WatchStateContext(service, CreateMediaFactory(), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(5), Episode);
+
+        await Assert.That(media.IsWatched).IsFalse();
+        await Assert.That(media.WatchProgress).IsEqualTo(0.25d)
+            .Because("A stale progress bar is half of the bug: it must move as playback is recorded.");
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_InvalidatesFolderStatsWhenTheItemBecomesWatched()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(19), Episode);
+
+        await Assert.That(stats.InvalidateCount).IsEqualTo(1)
+            .Because("\"Season 1 - 23 unwatched\" is cached per folder and must be recomputed once an episode is finished.");
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_DoesNotInvalidateFolderStatsOnOrdinaryProgress()
+    {
+        // Progress is recorded every few seconds. The unwatched count only changes when an item
+        // crosses the threshold, so invalidating on every tick would throw the cache away for nothing.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(5), Episode);
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(6), Episode);
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(7), Episode);
+
+        await Assert.That(stats.InvalidateCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_DoesNotInvalidateAgainForAnItemThatWasAlreadyWatched()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        const string location = @"D:\Anime\ep1.mkv";
+        await service.RecordProgressAsync(location, TimeSpan.FromMinutes(19), Episode);
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(location);
+
+        // Rewatching a finished episode records progress again, but it stays watched.
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(2), Episode);
+
+        await Assert.That(stats.InvalidateCount).IsEqualTo(0);
+        await Assert.That(media.IsWatched).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_InvalidatesFolderStatsOnlyAfterTheStateIsPersisted()
+    {
+        // Folder statistics are computed from the database, not from the in-memory cache. Dropping
+        // them before the write lands would let the next request recompute from the old rows and
+        // cache that stale answer all over again.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService inner = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var service = new AsyncWatchStateService(inner);
+        var stats = new FakeFolderStatsService();
+        bool persistedWhenInvalidated = false;
+        stats.OnInvalidate = () => persistedWhenInvalidated = service.WriteCompleted;
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(19), Episode);
+
+        await Assert.That(stats.InvalidateCount).IsEqualTo(1);
+        await Assert.That(persistedWhenInvalidated).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_RefreshesTheItemOnTheCallersContext()
+    {
+        // IsWatched and WatchProgress are bound to the tile on screen, and changing a bound
+        // property from a background thread throws 0x8001010E. The write below completes on a
+        // thread-pool thread, so a ConfigureAwait(false) anywhere on this path would move the
+        // refresh off the caller's context. The Continue Watching bug fixed earlier in this
+        // project was exactly that, one method over.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService inner = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var context = new WatchStateContext(
+            new AsyncWatchStateService(inner), CreateMediaFactory(), new FakeFolderStatsService(),
+            NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        var uiContext = new MarkerSynchronizationContext();
+        SynchronizationContext? observed = null;
+        bool changed = false;
+        media.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(MediaViewModel.IsWatched)) return;
+            changed = true;
+            observed = SynchronizationContext.Current;
+        };
+
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(uiContext);
+        try
+        {
+            await context.RecordProgressAsync(media, TimeSpan.FromMinutes(19), Episode);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await Assert.That(changed).IsTrue();
+        await Assert.That(ReferenceEquals(observed, uiContext)).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_WhenTheItemBecomesWatched_DropsItFromALoadedContinueWatching()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel finishing = await CreateMediaForFileAsync(fixture.DirectoryPath, "finishing.mkv");
+        MediaViewModel other = await CreateMediaForFileAsync(fixture.DirectoryPath, "other.mkv");
+        await service.RecordProgressAsync(finishing.Location, TimeSpan.FromMinutes(5), Episode);
+        await service.RecordProgressAsync(other.Location, TimeSpan.FromMinutes(6), Episode);
+        var context = new WatchStateContext(service, CreateLibraryFactory(finishing, other), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
+        await context.RefreshAsync(25);
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(2);
+
+        await context.RecordProgressAsync(finishing, TimeSpan.FromMinutes(19), Episode);
+
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1)
+            .Because("A finished episode leaves Continue Watching without the Home page having to be rebuilt.");
+        await Assert.That(ReferenceEquals(context.ContinueWatching[0], other)).IsTrue();
+    }
+
+    [Test]
+    public async Task RecordProgressAsync_DoesNotLoadContinueWatchingThatNothingHasAskedFor()
+    {
+        // Until the Home page has loaded the list there is nothing on screen to correct, and
+        // resolving up to 25 files in the middle of playback would be work for no one.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel media = await CreateMediaForFileAsync(fixture.DirectoryPath, "ep1.mkv");
+        await service.RecordProgressAsync(media.Location, TimeSpan.FromMinutes(5), Episode);
+        var context = new WatchStateContext(service, CreateLibraryFactory(media), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
+
+        await context.RecordProgressAsync(media, TimeSpan.FromMinutes(19), Episode);
+
+        await Assert.That(context.IsLoaded).IsFalse();
+        await Assert.That(context.ContinueWatching).IsEmpty();
     }
 
     /// <summary>
