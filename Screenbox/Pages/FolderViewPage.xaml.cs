@@ -73,6 +73,9 @@ public sealed partial class FolderViewPage : Page
         }
     }
 
+    // The file menu comes out of Resources as object and is cast to a WinRT runtime class. Under
+    // trimming (release builds publish with AOT) that cast can fail unless its metadata is kept.
+    [DynamicWindowsRuntimeCast(typeof(Windows.UI.Xaml.Controls.MenuFlyout))]
     private void FolderView_OnItemContextRequested(ListViewContextBehavior sender, ListViewContextRequestedEventArgs e)
     {
         if (e.Item.Content is not StorageItemViewModel content)
