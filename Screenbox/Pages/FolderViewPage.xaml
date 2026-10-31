@@ -51,6 +51,14 @@
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.ToggleWatchedCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextItem.Media, Mode=OneWay}"
+                    Text="{x:Bind helpers:ItemLabelHelper.GetWatchedToggleLabel(ViewModel.ContextItem.Media.IsWatched), Mode=OneWay}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind converters:GlyphConverter.ToWatchedToggleGlyph(ViewModel.ContextItem.Media.IsWatched), Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
                 <MenuFlyoutSubItem x:Name="AddToPlaylistSubMenu" Text="{x:Bind strings:Resources.AddToPlaylist}">
                     <MenuFlyoutSubItem.Icon>
                         <FontIcon

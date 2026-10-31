@@ -156,6 +156,20 @@ public static class ItemLabelHelper
     }
 
     /// <summary>
+    /// Gets the localized label for the menu item that toggles an item's watched state. The label
+    /// names the action the item will perform, not the state it is in.
+    /// </summary>
+    /// <param name="isWatched"><see langword="true"/> if the item is currently watched; otherwise, <see langword="false"/>.</param>
+    /// <returns>
+    /// The localized "mark as unwatched" label if <paramref name="isWatched"/> is <see langword="true"/>;
+    /// otherwise, the localized "mark as watched" label.
+    /// </returns>
+    public static string GetWatchedToggleLabel(bool isWatched)
+    {
+        return isWatched ? Strings.Resources.MarkAsUnwatched : Strings.Resources.MarkAsWatched;
+    }
+
+    /// <summary>
     /// Gets a caption describing a storage item based on whether it is a file or folder,
     /// preferring aggregate folder statistics over the plain item count when available.
     /// </summary>

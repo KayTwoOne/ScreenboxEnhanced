@@ -141,6 +141,11 @@ public sealed class WatchStateService : IWatchStateService
 
         // Same immutable-update approach as RecordProgressAsync: build a new instance instead
         // of mutating the cached one in place, so a concurrent update can't be lost.
+        //
+        // Marking watched keeps whatever progress was recorded. Clearing the flag starts the item
+        // over: it forgets the position and the last-played time as well. A finished item's last
+        // position sits at its end, so clearing only the flag would leave it at ~95% progress and
+        // list it under Continue Watching while the user has just said they have not watched it.
         WatchStateDto state = _cache.AddOrUpdate(
             normalized,
             _ => new WatchStateDto
@@ -148,16 +153,16 @@ public sealed class WatchStateService : IWatchStateService
                 Location = normalized,
                 OriginalLocation = location,
                 Completed = watched,
-                LastPlayed = now
+                LastPlayed = watched ? now : null
             },
             (_, existing) => new WatchStateDto
             {
                 Location = normalized,
                 OriginalLocation = location,
                 Completed = watched,
-                LastPlayed = existing.LastPlayed ?? now,
+                LastPlayed = watched ? existing.LastPlayed ?? now : null,
                 Duration = existing.Duration,
-                LastPosition = existing.LastPosition
+                LastPosition = watched ? existing.LastPosition : TimeSpan.Zero
             });
 
         await PersistAsync(state);

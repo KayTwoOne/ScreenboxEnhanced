@@ -179,8 +179,8 @@ public sealed partial class WatchStateContext : ObservableObject
     /// Records playback progress for <paramref name="media"/> and applies everything that follows
     /// from it, so playback does not have to know what else is showing watch state.
     /// <para>
-    /// This is the one place that reacts to an item's watch state changing, whatever changed it.
-    /// The reaction is: bring the item's own
+    /// This and <see cref="SetWatchedAsync"/> are the one place that reacts to an item's watch
+    /// state changing, whatever changed it. The reaction is: bring the item's own
     /// <see cref="MediaViewModel.IsWatched"/> and <see cref="MediaViewModel.WatchProgress"/> up to
     /// date; and, only when the item crossed between watched and unwatched, drop the cached folder
     /// statistics (their unwatched counts) and refresh <see cref="ContinueWatching"/>. Progress
@@ -198,6 +198,24 @@ public sealed partial class WatchStateContext : ObservableObject
     {
         bool wasWatched = _watchStateService.IsWatched(media.Location);
         await _watchStateService.RecordProgressAsync(media.Location, position, duration);
+        await ReactToChangeAsync(media, wasWatched);
+    }
+
+    /// <summary>
+    /// Marks <paramref name="media"/> watched or unwatched on the user's say-so, then applies the
+    /// same reaction as <see cref="RecordProgressAsync"/>: the item, the folder statistics and
+    /// Continue Watching follow what the database now says. The Mark as watched / unwatched menu
+    /// items all end up here, so no page carries its own copy of that logic.
+    /// <para>
+    /// As in <see cref="RecordProgressAsync"/>, nothing after an await uses
+    /// <c>ConfigureAwait(false)</c>: the continuation updates bound properties and must resume on
+    /// the caller's UI context.
+    /// </para>
+    /// </summary>
+    public async Task SetWatchedAsync(MediaViewModel media, bool watched)
+    {
+        bool wasWatched = _watchStateService.IsWatched(media.Location);
+        await _watchStateService.SetWatchedAsync(media.Location, watched);
         await ReactToChangeAsync(media, wasWatched);
     }
 

@@ -544,6 +544,124 @@ public sealed class WatchStateContextTests
         await Assert.That(context.ContinueWatching).IsEmpty();
     }
 
+    // ------------------------------------------------------------------
+    // SetWatchedAsync: the same reaction, reached from the Mark as watched / unwatched menu item
+    // instead of from playback.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task SetWatchedAsync_MarkingWatched_UpdatesTheItemAndDropsItFromContinueWatching()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel half = await CreateMediaForFileAsync(fixture.DirectoryPath, "half.mkv");
+        MediaViewModel other = await CreateMediaForFileAsync(fixture.DirectoryPath, "other.mkv");
+        await service.RecordProgressAsync(half.Location, TimeSpan.FromMinutes(5), Episode);
+        await service.RecordProgressAsync(other.Location, TimeSpan.FromMinutes(6), Episode);
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateLibraryFactory(half, other), stats, NullLogger<WatchStateContext>.Instance);
+        await context.RefreshAsync(25);
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(2);
+
+        await context.SetWatchedAsync(half, watched: true);
+
+        await Assert.That(half.IsWatched).IsTrue();
+        await Assert.That(half.ShouldShowProgress).IsFalse();
+        await Assert.That(stats.InvalidateCount).IsEqualTo(1);
+        await Assert.That(context.ContinueWatching.Count).IsEqualTo(1)
+            .Because("Marking an episode watched is the way to clear it from Continue Watching.");
+        await Assert.That(ReferenceEquals(context.ContinueWatching[0], other)).IsTrue();
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_MarkingUnwatched_UpdatesTheItemAndInvalidatesFolderStats()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+        await service.RecordProgressAsync(media.Location, TimeSpan.FromMinutes(19), Episode);
+        media.RefreshWatchState(service);
+        await Assert.That(media.IsWatched).IsTrue();
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+
+        await context.SetWatchedAsync(media, watched: false);
+
+        await Assert.That(media.IsWatched).IsFalse();
+        await Assert.That(media.WatchProgress).IsEqualTo(0d);
+        await Assert.That(stats.InvalidateCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_MarkingUnwatched_DoesNotPutTheItemInContinueWatching()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel finished = await CreateMediaForFileAsync(fixture.DirectoryPath, "finished.mkv");
+        await service.RecordProgressAsync(finished.Location, TimeSpan.FromMinutes(19), Episode);
+        var context = new WatchStateContext(service, CreateLibraryFactory(finished), new FakeFolderStatsService(), NullLogger<WatchStateContext>.Instance);
+        await context.RefreshAsync(25);
+        await Assert.That(context.ContinueWatching).IsEmpty();
+
+        await context.SetWatchedAsync(finished, watched: false);
+
+        await Assert.That(context.ContinueWatching).IsEmpty()
+            .Because("An episode just marked unwatched has not been started; it is not something to continue.");
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_ToTheStateTheItemAlreadyHas_DoesNotInvalidateFolderStats()
+    {
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService service = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+        await service.SetWatchedAsync(media.Location, watched: true);
+        var stats = new FakeFolderStatsService();
+        var context = new WatchStateContext(service, CreateMediaFactory(), stats, NullLogger<WatchStateContext>.Instance);
+
+        await context.SetWatchedAsync(media, watched: true);
+
+        await Assert.That(stats.InvalidateCount).IsEqualTo(0);
+        await Assert.That(media.IsWatched).IsTrue();
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_RefreshesTheItemOnTheCallersContext()
+    {
+        // Same constraint as RecordProgressAsync: the write completes on a thread-pool thread, and
+        // the item's bound properties must still change on the caller's (UI) context.
+        using var fixture = new TestDirectoryFixture();
+        WatchStateService inner = await CreateWatchStateServiceAsync(fixture.DirectoryPath);
+        var context = new WatchStateContext(
+            new AsyncWatchStateService(inner), CreateMediaFactory(), new FakeFolderStatsService(),
+            NullLogger<WatchStateContext>.Instance);
+        MediaViewModel media = CreateMedia(@"D:\Anime\ep1.mkv");
+
+        var uiContext = new MarkerSynchronizationContext();
+        SynchronizationContext? observed = null;
+        bool changed = false;
+        media.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(MediaViewModel.IsWatched)) return;
+            changed = true;
+            observed = SynchronizationContext.Current;
+        };
+
+        SynchronizationContext? previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(uiContext);
+        try
+        {
+            await context.SetWatchedAsync(media, watched: true);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+        }
+
+        await Assert.That(changed).IsTrue();
+        await Assert.That(ReferenceEquals(observed, uiContext)).IsTrue();
+    }
+
     /// <summary>
     /// Stands in for the UI thread's context: runs posted continuations on the thread pool with
     /// itself installed as current, so code that resumes on its caller's context can be told

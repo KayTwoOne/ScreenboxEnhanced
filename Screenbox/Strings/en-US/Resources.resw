@@ -205,6 +205,12 @@
   <data name="Pause" xml:space="preserve">
     <value>Pause</value>
   </data>
+  <data name="MarkAsWatched" xml:space="preserve">
+    <value>Mark as watched</value>
+  </data>
+  <data name="MarkAsUnwatched" xml:space="preserve">
+    <value>Mark as unwatched</value>
+  </data>
   <data name="More" xml:space="preserve">
     <value>More</value>
   </data>

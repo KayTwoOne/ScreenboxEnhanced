@@ -70,6 +70,73 @@ public sealed class WatchStateServiceTests
     }
 
     [Test]
+    public async Task SetWatchedAsync_Clearing_StartsTheItemOverRatherThanLeavingItNearTheEnd()
+    {
+        // "Mark as unwatched" is how a user undoes an episode that was marked watched by seeking to
+        // its end. A finished item's last position sits at the end, so clearing only the flag would
+        // leave it at ~95% progress and list it under Continue Watching, still looking nearly done.
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, DatabaseService db) = await CreateAsync(fixture.DirectoryPath);
+        const string loc = @"D:\ep4b.mkv";
+        await service.RecordProgressAsync(loc, TimeSpan.FromMinutes(19), TimeSpan.FromMinutes(20));
+
+        await service.SetWatchedAsync(loc, watched: false);
+
+        await Assert.That(service.IsWatched(loc)).IsFalse();
+        await Assert.That(service.GetProgress(loc)).IsEqualTo(0d);
+        await Assert.That(service.GetContinueWatching(25)).IsEmpty();
+
+        // And it is what was persisted, not just what is cached.
+        var reloaded = new WatchStateService(db, NullLogger<WatchStateService>.Instance);
+        await reloaded.LoadAsync();
+        await Assert.That(reloaded.IsWatched(loc)).IsFalse();
+        await Assert.That(reloaded.GetProgress(loc)).IsEqualTo(0d);
+        await Assert.That(reloaded.GetContinueWatching(25)).IsEmpty();
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_ClearingAnItemThatWasNeverPlayed_DoesNotInventAContinueWatchingEntry()
+    {
+        // Marking something watched that was never played, then changing your mind, must leave it
+        // exactly as it was: not partially watched at 0%.
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, _) = await CreateAsync(fixture.DirectoryPath);
+        const string loc = @"D:\never-played.mkv";
+
+        await service.SetWatchedAsync(loc, watched: true);
+        await Assert.That(service.IsWatched(loc)).IsTrue();
+        await service.SetWatchedAsync(loc, watched: false);
+
+        await Assert.That(service.IsWatched(loc)).IsFalse();
+        await Assert.That(service.GetContinueWatching(25)).IsEmpty();
+
+        // Clearing the flag on something with no row at all must not create a started item either.
+        await service.SetWatchedAsync(@"D:\no-row-at-all.mkv", watched: false);
+        await Assert.That(service.GetContinueWatching(25)).IsEmpty();
+    }
+
+    [Test]
+    public async Task SetWatchedAsync_Marking_KeepsTheProgressThatWasRecorded()
+    {
+        // Marking watched is the opposite direction: nothing about how far the user got is erased.
+        using var fixture = new TestDirectoryFixture();
+        (WatchStateService service, DatabaseService db) = await CreateAsync(fixture.DirectoryPath);
+        const string loc = @"D:\ep4c.mkv";
+        await service.RecordProgressAsync(loc, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20));
+
+        await service.SetWatchedAsync(loc, watched: true);
+
+        await Assert.That(service.IsWatched(loc)).IsTrue();
+        await Assert.That(service.GetContinueWatching(25)).IsEmpty();
+
+        WatchStateDto? row = await db.LoadWatchStateAsync(loc.ToUpperInvariant());
+        await Assert.That(row).IsNotNull();
+        await Assert.That(row!.LastPosition).IsEqualTo(TimeSpan.FromMinutes(5));
+        await Assert.That(row.Duration).IsEqualTo(TimeSpan.FromMinutes(20));
+        await Assert.That(row.LastPlayed).IsNotNull();
+    }
+
+    [Test]
     public async Task State_SurvivesReload()
     {
         using var fixture = new TestDirectoryFixture();

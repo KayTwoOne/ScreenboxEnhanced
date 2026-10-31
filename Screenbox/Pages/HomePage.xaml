@@ -62,6 +62,14 @@
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.ToggleWatchedCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextMedia, Mode=OneWay}"
+                    Text="{x:Bind helpers:ItemLabelHelper.GetWatchedToggleLabel(ViewModel.ContextMedia.IsWatched), Mode=OneWay}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind converters:GlyphConverter.ToWatchedToggleGlyph(ViewModel.ContextMedia.IsWatched), Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
                 <MenuFlyoutSubItem x:Name="AddToPlaylistSubMenu" Text="{x:Bind strings:Resources.AddToPlaylist}">
                     <MenuFlyoutSubItem.Icon>
                         <FontIcon
@@ -124,6 +132,43 @@
                             x:Name="SelectMenuFlyoutItemIcon"
                             FontFamily="{StaticResource ScreenboxSymbolThemeFontFamily}"
                             Glyph="{StaticResource SingleSelectGlyph}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+
+            <MenuFlyout x:Key="ContinueWatchingFlyout">
+                <MenuFlyoutItem
+                    Command="{x:Bind ViewModel.PlayCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextMedia, Mode=OneWay}"
+                    Text="{x:Bind helpers:ItemLabelHelper.GetPlayPauseLabel(ViewModel.ContextMedia.IsPlaying), Mode=OneWay}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon FontFamily="{StaticResource ScreenboxSymbolThemeFontFamily}" Glyph="{x:Bind converters:GlyphConverter.ToPlayPauseGlyph(ViewModel.ContextMedia.IsPlaying), Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.PlayNextCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextMedia, Mode=OneWay}"
+                    Icon="{ui:FontIcon FontFamily={StaticResource ScreenboxSymbolThemeFontFamily},
+                                       Glyph={StaticResource PlayAddGlyph}}"
+                    Text="{x:Bind strings:Resources.PlayNext}" />
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.AddToQueueCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextMedia, Mode=OneWay}"
+                    Text="{x:Bind strings:Resources.AddToQueue}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon
+                            x:Name="ContinueWatchingAddToQueueMenuFlyoutItemIcon"
+                            FontFamily="{StaticResource ScreenboxSymbolThemeFontFamily}"
+                            Glyph="{StaticResource PlaylistMusicAddGlyph}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.ToggleWatchedCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextMedia, Mode=OneWay}"
+                    Text="{x:Bind helpers:ItemLabelHelper.GetWatchedToggleLabel(ViewModel.ContextMedia.IsWatched), Mode=OneWay}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind converters:GlyphConverter.ToWatchedToggleGlyph(ViewModel.ContextMedia.IsWatched), Mode=OneWay}" />
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
             </MenuFlyout>
@@ -236,6 +281,7 @@
             ScrollViewer.VerticalScrollMode="Disabled"
             SelectionMode="None">
             <interactivity:Interaction.Behaviors>
+                <behaviors:ListViewContextBehavior ContextItem="{x:Bind ViewModel.ContextMedia, Mode=TwoWay}" Flyout="{StaticResource ContinueWatchingFlyout}" />
                 <behaviors:ThumbnailGridViewBehavior />
             </interactivity:Interaction.Behaviors>
         </GridView>
@@ -425,6 +471,7 @@
                         <Setter Target="OpenMenuFlyoutFolderItemIcon.Glyph" Value="{StaticResource FolderListMirroredGlyph}" />
                         <Setter Target="AddToQueueMenuFlyoutItemIcon.Glyph" Value="{StaticResource PlaylistMusicAddMirroredGlyph}" />
                         <contract13NotPresent:Setter Target="AddToPlaylistMenuFlyoutSubItemIcon.Glyph" Value="{StaticResource PlaylistAddMirroredGlyph}" />
+                        <Setter Target="ContinueWatchingAddToQueueMenuFlyoutItemIcon.Glyph" Value="{StaticResource PlaylistMusicAddMirroredGlyph}" />
                         <Setter Target="SelectMenuFlyoutItemIcon.Glyph" Value="{StaticResource SingleSelectMirroredGlyph}" />
                     </VisualState.Setters>
                 </VisualState>

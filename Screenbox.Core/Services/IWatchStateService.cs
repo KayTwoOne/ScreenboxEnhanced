@@ -28,6 +28,10 @@ public interface IWatchStateService
     /// <summary>Returns partially watched items, most recently played first.</summary>
     IReadOnlyList<WatchStateDto> GetContinueWatching(int limit);
 
-    /// <summary>Explicitly sets or clears the watched flag.</summary>
+    /// <summary>
+    /// Explicitly sets or clears the watched flag. Setting it keeps the recorded progress. Clearing
+    /// it starts the item over: the position and last-played time are forgotten too, so an item
+    /// marked unwatched neither shows progress nor appears under Continue Watching.
+    /// </summary>
     Task SetWatchedAsync(string location, bool watched);
 }

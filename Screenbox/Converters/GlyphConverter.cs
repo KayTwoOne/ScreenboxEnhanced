@@ -134,6 +134,23 @@ public static partial class GlyphConverter
     }
 
     /// <summary>
+    /// Gets the glyph code for the menu item that toggles an item's watched state. Like its label,
+    /// the glyph shows the action the item will perform, not the state it is in.
+    /// </summary>
+    /// <param name="isWatched">A <see cref="bool"/> that represents whether the item is currently watched.</param>
+    /// <returns>
+    /// <strong>Undo</strong> glyph code <see cref="string"/> if <paramref name="isWatched"/> is <see langword="true"/>
+    /// (the item will be marked unwatched); otherwise, <strong>Check Mark</strong> glyph code.
+    /// </returns>
+    public static string ToWatchedToggleGlyph(bool isWatched)
+    {
+        const string CheckMarkGlyph = "";
+        const string UndoGlyph = "";
+
+        return isWatched ? UndoGlyph : CheckMarkGlyph;
+    }
+
+    /// <summary>
     /// Gets the playing state solid gylph code based on a boolean condition.
     /// </summary>
     /// <param name="value">A <see cref="bool"/> that represents the playing state.</param>
