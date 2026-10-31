@@ -20,7 +20,6 @@ namespace Screenbox.Core.Services;
 public sealed class JikanMetadataProvider : IMetadataProvider
 {
     private const string Endpoint = "https://api.jikan.moe/v4/anime";
-    private const string UserAgent = "Screenbox/1.0 (+https://github.com/screenbox)";
 
     private static readonly TimeSpan DefaultRequestTimeout = TimeSpan.FromSeconds(15);
 
@@ -51,7 +50,10 @@ public sealed class JikanMetadataProvider : IMetadataProvider
         {
             string url = $"{Endpoint}?q={Uri.EscapeDataString(query)}&limit=5";
             using HttpRequestMessage request = new(HttpMethod.Get, url);
-            request.Headers.UserAgent.ParseAdd(UserAgent);
+            // Set per request too, so the provider identifies itself even on a client that did
+            // not come from MetadataProviderFactory. A request-level value takes precedence over
+            // the client default rather than being merged with it, so this never duplicates.
+            request.Headers.UserAgent.ParseAdd(MetadataProviderFactory.UserAgent);
 
             using HttpResponseMessage response = await _client
                 .SendAsync(request, timeoutCts.Token)

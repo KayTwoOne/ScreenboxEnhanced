@@ -274,4 +274,22 @@ public sealed class ArtworkServiceTests
 
         await Assert.That(written).IsFalse();
     }
+
+    [Test]
+    public async Task SetScrapedPosterAsync_PlainHttpUrl_IsRejectedBeforeAnyClientExists()
+    {
+        // Every supported provider serves artwork over HTTPS, so plain HTTP is refused outright.
+        // Asserting only the false return would not prove that: an accepted HTTP URL also returns
+        // false once its download fails. The client-creation probe is what discriminates. The URL
+        // is a refused local port, so even a regression sends nothing off the machine.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+
+        bool written = await artworkService.SetScrapedPosterAsync(
+            @"D:\Anime\Dan Da Dan", "http://127.0.0.1:9/poster.jpg", CancellationToken.None);
+
+        await Assert.That(written).IsFalse();
+        await Assert.That(artworkService.HasCreatedHttpClient).IsFalse();
+    }
 }

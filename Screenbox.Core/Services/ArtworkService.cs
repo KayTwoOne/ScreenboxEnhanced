@@ -309,8 +309,9 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
 
     private async Task<byte[]?> DownloadPosterBytesAsync(string posterUrl, CancellationToken ct)
     {
-        if (!Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri)
-            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        // HTTPS only. Every supported provider serves its artwork over HTTPS, so accepting plain
+        // HTTP would add nothing but a window for a tampered image to be written into the library.
+        if (!Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps)
         {
             return null;
         }
@@ -335,6 +336,14 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
 
         return bytes;
     }
+
+    /// <summary>
+    /// Whether the poster-download client has been created. Lets tests prove a rejected URL was
+    /// turned away before anything network-capable came into existence, rather than merely
+    /// failing its download - both return <see langword="false"/>, so the result alone cannot
+    /// tell them apart.
+    /// </summary>
+    internal bool HasCreatedHttpClient => _httpClient is not null;
 
     private HttpClient GetOrCreateHttpClient()
     {

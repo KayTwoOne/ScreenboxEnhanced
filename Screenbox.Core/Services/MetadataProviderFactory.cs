@@ -8,9 +8,13 @@ namespace Screenbox.Core.Services;
 /// <inheritdoc cref="IMetadataProviderFactory"/>
 public sealed partial class MetadataProviderFactory : IMetadataProviderFactory
 {
-    // Jikan asks callers to identify themselves; AniList and TMDB do not require it, but sending
-    // one on every request is good API etiquette and costs nothing.
-    private const string UserAgent = "Screenbox/1.0 (+https://github.com/screenbox)";
+    /// <summary>
+    /// Identifies this app to metadata providers. Jikan asks callers to identify themselves;
+    /// AniList and TMDB do not require it, but sending one is good API etiquette. The URL is
+    /// where an API operator can reach whoever maintains this build, so it must point at this
+    /// fork - not at the original Screenbox project, which does not send these requests.
+    /// </summary>
+    internal const string UserAgent = "ScreenboxEnhanced/1.0 (+https://github.com/KayTwoOne/ScreenboxEnhanced)";
 
     private static readonly TimeSpan ClientTimeout = TimeSpan.FromSeconds(30);
 
