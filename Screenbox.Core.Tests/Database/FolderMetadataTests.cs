@@ -210,6 +210,132 @@ public sealed class FolderMetadataTests
         await Assert.That(cleared.PosterFile).IsEqualTo("m_2222_cc.jpg");
     }
 
+    // ------------------------------------------------------------------
+    // ClearManualFolderPosterAsync: how a user takes back a poster they once chose. Every assertion
+    // is made on the persisted row, since it is the row - not any reader - that decides which
+    // artwork a folder can ever have again.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task ClearManualFolderPosterAsync_ManualPoster_ClearsTheRowAndReturnsTheFile()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Dan Da Dan";
+        await db.SetFolderPosterAsync(path, "m_aaaa_01.jpg", PosterSource.Manual);
+
+        string? removed = await db.ClearManualFolderPosterAsync(path);
+
+        await Assert.That(removed).IsEqualTo("m_aaaa_01.jpg")
+            .Because("The caller deletes the artwork file, so it must be told which one.");
+        FolderMetadataDto? row = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(row).IsNotNull();
+        await Assert.That(row!.PosterFile).IsNull();
+        await Assert.That(row.PosterSource).IsEqualTo(PosterSource.None);
+    }
+
+    [Test]
+    public async Task ClearManualFolderPosterAsync_TouchesNoColumnOtherThanThePoster()
+    {
+        // The custom title shares the row with the poster. Removing the image must not rename the
+        // folder back, and a row rewritten whole from stale values would also lose the pin and order.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Frieren";
+        await db.SaveFolderMetadataAsync(new FolderMetadataDto
+        {
+            Path = path,
+            CustomTitle = "Frieren: Beyond Journey's End",
+            PosterFile = "m_bbbb_02.png",
+            PosterSource = PosterSource.Manual,
+            ProviderPin = "anilist:154587",
+            SortOrder = 7
+        });
+
+        await db.ClearManualFolderPosterAsync(path);
+
+        FolderMetadataDto? row = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(row).IsNotNull();
+        await Assert.That(row!.CustomTitle).IsEqualTo("Frieren: Beyond Journey's End");
+        await Assert.That(row.ProviderPin).IsEqualTo("anilist:154587");
+        await Assert.That(row.SortOrder).IsEqualTo(7);
+        await Assert.That(row.PosterFile).IsNull();
+        await Assert.That(row.PosterSource).IsEqualTo(PosterSource.None);
+    }
+
+    [Test]
+    public async Task ClearManualFolderPosterAsync_NeverClearsAPosterThatIsNotManual()
+    {
+        // Automatic, convention and online artwork are not the user's to remove. Clearing them
+        // would also orphan nothing and fix nothing: the next resolve simply recreates them.
+        foreach (PosterSource source in new[] { PosterSource.AutoFrame, PosterSource.Convention, PosterSource.Scraped })
+        {
+            using var fixture = new TestDirectoryFixture();
+            DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+            const string path = @"D:\Media\Anime\Gachiakuta";
+            await db.SetFolderCustomTitleAsync(path, "Gachiakuta");
+            await db.SetFolderPosterAsync(path, "g_cccc_03.jpg", source);
+
+            string? removed = await db.ClearManualFolderPosterAsync(path);
+
+            await Assert.That(removed).IsNull().Because($"A {source} poster is not a manual one.");
+            FolderMetadataDto? row = await db.LoadFolderMetadataAsync(path);
+            await Assert.That(row!.PosterFile).IsEqualTo("g_cccc_03.jpg");
+            await Assert.That(row.PosterSource).IsEqualTo(source);
+            await Assert.That(row.CustomTitle).IsEqualTo("Gachiakuta");
+        }
+    }
+
+    [Test]
+    public async Task ClearManualFolderPosterAsync_FolderWithNoRow_ReturnsNullAndCreatesNone()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+
+        string? removed = await db.ClearManualFolderPosterAsync(@"D:\Media\Anime\Unknown");
+
+        await Assert.That(removed).IsNull();
+        await Assert.That(await db.LoadFolderMetadataAsync(@"D:\Media\Anime\Unknown")).IsNull();
+    }
+
+    [Test]
+    public async Task ClearManualFolderPosterAsync_PosterReplacedWhileItWaits_LeavesTheNewPosterAlone()
+    {
+        // The guarantee is "only if the poster is STILL Manual", not "was Manual when we looked". A
+        // scrape can land a poster after the user opens the dialog, so the check has to be made in the
+        // same transaction as the clear. Another connection holds the write lock and replaces the
+        // poster; the clear is started while it is held, and so can only run after that commit. A
+        // clear that read the row first, or wrote unconditionally afterwards, wipes the new poster.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateServiceAsync(fixture.DirectoryPath);
+        const string path = @"D:\Media\Anime\Suzume";
+        await db.SetFolderPosterAsync(path, "m_dddd_04.jpg", PosterSource.Manual);
+
+        using SqliteConnection other = OpenRaw(fixture.DirectoryPath);
+        using SqliteTransaction replacing = other.BeginTransaction(deferred: false);
+        using (SqliteCommand replace = other.CreateCommand())
+        {
+            replace.Transaction = replacing;
+            replace.CommandText =
+                "UPDATE folder_metadata SET poster_file = 'g_eeee_05.jpg', poster_source = 4 WHERE path = @path;";
+            replace.Parameters.AddWithValue("@path", path);
+            replace.ExecuteNonQuery();
+        }
+
+        // Task.Run: the database service does its SQLite work inline, so starting the clear from this
+        // thread would block here, holding the lock it is waiting for, until the timeout.
+        Task<string?> clear = Task.Run(() => db.ClearManualFolderPosterAsync(path));
+        await Task.Delay(300);
+        replacing.Commit();
+        string? removed = await clear;
+
+        await Assert.That(removed).IsNull()
+            .Because("By the time the clear ran, the poster was no longer a manual one.");
+        FolderMetadataDto? row = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(row!.PosterFile).IsEqualTo("g_eeee_05.jpg");
+        await Assert.That(row.PosterSource).IsEqualTo(PosterSource.Scraped);
+    }
+
     [Test]
     public async Task ListFolderMetadataAsync_ReturnsEveryStoredRow()
     {

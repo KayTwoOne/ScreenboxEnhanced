@@ -48,6 +48,44 @@ public sealed class FolderViewPageViewModelTests
             folderStatsService: null!);
     }
 
+    private static FolderViewPageViewModel CreateViewModel(IDatabaseService databaseService, IArtworkService artworkService)
+    {
+        DispatcherQueueTestHelper.EnsureDispatcherQueue();
+        return new FolderViewPageViewModel(
+            filesService: null!,
+            navigationService: null!,
+            storageVmFactory: null!,
+            artworkService: artworkService,
+            databaseService: databaseService,
+            folderStatsService: null!);
+    }
+
+    /// <summary>
+    /// Records which poster writes the view model asks the artwork service for. Every other member
+    /// throws, so an edit that reaches for something it should not fails loudly.
+    /// </summary>
+    private sealed class RecordingArtworkService : IArtworkService
+    {
+        public List<string> RemovedFor { get; } = [];
+        public List<string> SetFor { get; } = [];
+
+        public Task<bool> RemoveManualPosterAsync(string folderPath)
+        {
+            RemovedFor.Add(folderPath);
+            return Task.FromResult(true);
+        }
+
+        public Task<string?> SetManualPosterAsync(StorageFolder folder, StorageFile image)
+        {
+            SetFor.Add(folder.Path);
+            return Task.FromResult<string?>("m_recorded.jpg");
+        }
+
+        public Task<string?> GetPosterFileNameAsync(StorageFolder folder, FolderMetadataDto? metadata) => throw new NotSupportedException();
+        public Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths) => throw new NotSupportedException();
+        public Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct) => throw new NotSupportedException();
+    }
+
     [Test]
     public async Task ApplyFolderEditAsync_WithEmptyTitle_StoresNullCustomTitle()
     {
@@ -56,7 +94,7 @@ public sealed class FolderViewPageViewModelTests
         StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
         FolderViewPageViewModel vm = CreateViewModel(db);
 
-        await vm.ApplyFolderEditAsync(folder, string.Empty, poster: null);
+        await vm.ApplyFolderEditAsync(folder, string.Empty, poster: null, removePoster: false);
 
         FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(folder.Path);
         await Assert.That(loaded).IsNotNull();
@@ -73,7 +111,7 @@ public sealed class FolderViewPageViewModelTests
 
         // The dialog pre-fills with the current DisplayName, which for a folder with no custom
         // title is the on-disk name. Saving unedited must not pin that name as an explicit title.
-        await vm.ApplyFolderEditAsync(folder, folder.Name, poster: null);
+        await vm.ApplyFolderEditAsync(folder, folder.Name, poster: null, removePoster: false);
 
         FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(folder.Path);
         await Assert.That(loaded).IsNotNull();
@@ -88,7 +126,7 @@ public sealed class FolderViewPageViewModelTests
         StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
         FolderViewPageViewModel vm = CreateViewModel(db);
 
-        await vm.ApplyFolderEditAsync(folder, "Dandadan", poster: null);
+        await vm.ApplyFolderEditAsync(folder, "Dandadan", poster: null, removePoster: false);
 
         FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(folder.Path);
         await Assert.That(loaded).IsNotNull();
@@ -114,7 +152,7 @@ public sealed class FolderViewPageViewModelTests
 
         // No poster supplied: this is a title-only edit and must not disturb the existing
         // poster metadata written by a previous edit or by automatic artwork resolution.
-        await vm.ApplyFolderEditAsync(folder, "New Title", poster: null);
+        await vm.ApplyFolderEditAsync(folder, "New Title", poster: null, removePoster: false);
 
         FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(folder.Path);
         await Assert.That(loaded).IsNotNull();
@@ -123,5 +161,81 @@ public sealed class FolderViewPageViewModelTests
         await Assert.That(loaded.PosterSource).IsEqualTo(PosterSource.Manual);
         await Assert.That(loaded.ProviderPin).IsEqualTo("anilist:171018");
         await Assert.That(loaded.SortOrder).IsEqualTo(3);
+    }
+    [Test]
+    public async Task HasManualPosterAsync_IsTrueOnlyWhenTheStoredPosterIsAManualOne()
+    {
+        // The edit dialog offers "Remove custom image" only for a poster the user chose, because
+        // that is the only kind removal applies to. So this answer has to be exactly "is Manual".
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
+        FolderViewPageViewModel vm = CreateViewModel(db);
+
+        await Assert.That(await vm.HasManualPosterAsync(folder)).IsFalse()
+            .Because("A folder with no stored row has no poster of any kind.");
+
+        foreach (PosterSource source in new[] { PosterSource.AutoFrame, PosterSource.Convention, PosterSource.Scraped })
+        {
+            await db.SetFolderPosterAsync(folder.Path, "g_poster.jpg", source);
+            await Assert.That(await vm.HasManualPosterAsync(folder)).IsFalse().Because($"{source} is not a manual poster.");
+        }
+
+        await db.SetFolderPosterAsync(folder.Path, "m_poster.jpg", PosterSource.Manual);
+        await Assert.That(await vm.HasManualPosterAsync(folder)).IsTrue();
+    }
+
+    [Test]
+    public async Task ApplyFolderEditAsync_RemovePoster_RemovesTheManualPosterAndStillSavesTheTitle()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
+        var artwork = new RecordingArtworkService();
+        FolderViewPageViewModel vm = CreateViewModel(db, artwork);
+
+        await vm.ApplyFolderEditAsync(folder, "Dandadan", poster: null, removePoster: true);
+
+        await Assert.That(artwork.RemovedFor).IsEquivalentTo([folder.Path]);
+        await Assert.That(artwork.SetFor).IsEmpty();
+        FolderMetadataDto? loaded = await db.LoadFolderMetadataAsync(folder.Path);
+        await Assert.That(loaded!.CustomTitle).IsEqualTo("Dandadan");
+    }
+
+    [Test]
+    public async Task ApplyFolderEditAsync_NoRemovalRequested_NeverRemovesAPoster()
+    {
+        // A title-only edit must leave the poster alone.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
+        var artwork = new RecordingArtworkService();
+        FolderViewPageViewModel vm = CreateViewModel(db, artwork);
+
+        await vm.ApplyFolderEditAsync(folder, "Dandadan", poster: null, removePoster: false);
+
+        await Assert.That(artwork.RemovedFor).IsEmpty();
+        await Assert.That(artwork.SetFor).IsEmpty();
+    }
+
+    [Test]
+    public async Task ApplyFolderEditAsync_ChosenPosterWinsOverARemovalRequest()
+    {
+        // The dialog never sends both, but if it ever did, the image the user just picked is the
+        // one they want: replacing the old poster already removes it, and removing first would only
+        // briefly drop the folder back to automatic artwork.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(fixture.DirectoryPath);
+        string imagePath = Path.Combine(fixture.DirectoryPath, "chosen.jpg");
+        await File.WriteAllBytesAsync(imagePath, [1, 2, 3]);
+        StorageFile image = await StorageFile.GetFileFromPathAsync(imagePath);
+        var artwork = new RecordingArtworkService();
+        FolderViewPageViewModel vm = CreateViewModel(db, artwork);
+
+        await vm.ApplyFolderEditAsync(folder, "Dandadan", poster: image, removePoster: true);
+
+        await Assert.That(artwork.SetFor).IsEquivalentTo([folder.Path]);
+        await Assert.That(artwork.RemovedFor).IsEmpty();
     }
 }

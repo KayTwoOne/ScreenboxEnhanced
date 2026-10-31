@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using CommunityToolkit.WinUI;
+using Screenbox.Core.Enums;
 using Screenbox.Core.Factories;
 using Screenbox.Core.Helpers;
 using Screenbox.Core.Messages;
@@ -147,11 +148,14 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     }
 
     /// <summary>
-    /// Persists an edited folder title and, when supplied, a new manual poster.
+    /// Persists an edited folder title and, when supplied, a new manual poster, or removes the
+    /// existing manual poster when <paramref name="removePoster"/> is set.
     /// An empty title, or a title that matches the folder's on-disk name, clears the custom
     /// title so the folder name is used again (and stays in sync if the folder is later renamed).
+    /// A chosen <paramref name="poster"/> wins over <paramref name="removePoster"/>: replacing the
+    /// old image already removes it.
     /// </summary>
-    public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster)
+    public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster, bool removePoster)
     {
         // Writes the title column only. Reading the row, editing it in memory and writing it back
         // whole would race the artwork writer, which shares this row, and would undo a poster
@@ -163,6 +167,21 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
         {
             await _artworkService.SetManualPosterAsync(folder, poster);
         }
+        else if (removePoster)
+        {
+            await _artworkService.RemoveManualPosterAsync(folder.Path);
+        }
+    }
+
+    /// <summary>
+    /// Whether the folder's stored poster is one the user chose themselves. The edit dialog offers
+    /// to remove a custom image only when this is true, because a manual poster is the only kind
+    /// that removal applies to and the only kind nothing else can ever replace.
+    /// </summary>
+    public async Task<bool> HasManualPosterAsync(StorageFolder folder)
+    {
+        FolderMetadataDto? metadata = await _databaseService.LoadFolderMetadataAsync(folder.Path);
+        return metadata is { PosterSource: PosterSource.Manual };
     }
 
     protected virtual void Navigate(object? parameter = null)

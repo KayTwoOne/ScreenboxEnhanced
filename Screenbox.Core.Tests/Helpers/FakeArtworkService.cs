@@ -49,6 +49,10 @@ public sealed class FakeArtworkService : IArtworkService
         throw new NotSupportedException("MetadataScrapeCoordinator never sets a manual poster.");
 
     /// <inheritdoc/>
+    public Task<bool> RemoveManualPosterAsync(string folderPath) =>
+        throw new NotSupportedException("MetadataScrapeCoordinator never removes a manual poster.");
+
+    /// <inheritdoc/>
     public Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths) =>
         throw new NotSupportedException("MetadataScrapeCoordinator never prunes artwork.");
 }

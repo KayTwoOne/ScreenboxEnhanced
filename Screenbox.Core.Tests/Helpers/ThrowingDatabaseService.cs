@@ -33,6 +33,7 @@ public sealed class ThrowingDatabaseService : IDatabaseService
     public Task<List<FolderMetadataDto>> ListFolderMetadataAsync() => throw Fail();
     public Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source) => throw Fail();
     public Task SetFolderCustomTitleAsync(string path, string? customTitle) => throw Fail();
+    public Task<string?> ClearManualFolderPosterAsync(string path) => throw Fail();
     public Task DeleteFolderMetadataAsync(string path) => throw Fail();
     public Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache) => throw Fail();
     public Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path) => throw Fail();

@@ -22,6 +22,19 @@
             Click="ChooseImageButton_OnClick"
             Content="{x:Bind strings:Resources.ChooseImage}"
             HorizontalAlignment="Stretch" />
+        <Button
+            x:Name="RemoveImageButton"
+            Click="RemoveImageButton_OnClick"
+            Content="{x:Bind strings:Resources.RemoveCustomImage}"
+            HorizontalAlignment="Stretch"
+            Visibility="Collapsed" />
+        <TextBlock
+            x:Name="RemoveImageNote"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="{x:Bind strings:Resources.CustomImageWillBeRemoved}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed" />
         <Image
             x:Name="PreviewImage"
             MaxHeight="200"

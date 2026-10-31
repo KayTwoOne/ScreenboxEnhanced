@@ -31,6 +31,18 @@ public interface IArtworkService
     Task<string?> SetManualPosterAsync(StorageFolder folder, StorageFile image);
 
     /// <summary>
+    /// Removes a folder's manual poster, deleting its artwork file, so the folder can return to
+    /// automatic, convention and online artwork. A manual poster outranks all of those, and online
+    /// metadata deliberately never overwrites it, so without this a folder that was ever given an
+    /// image could never get anything else. Does nothing, and deletes nothing, when the folder's
+    /// poster is not a manual one. Also forgets that the folder was once searched without finding
+    /// any artwork, so artwork is resolved again the next time the folder is shown.
+    /// </summary>
+    /// <param name="folderPath">Absolute folder path; the row whose manual poster is removed.</param>
+    /// <returns>True when a manual poster was removed; false when there was none to remove.</returns>
+    Task<bool> RemoveManualPosterAsync(string folderPath);
+
+    /// <summary>
     /// Evicts stored folder metadata, and the artwork files it references, for folders that have
     /// disappeared from beneath the supplied library roots. Folders that still exist keep their
     /// titles and posters, manual choices included.

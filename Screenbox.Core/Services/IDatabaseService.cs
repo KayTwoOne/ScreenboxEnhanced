@@ -76,6 +76,21 @@ public interface IDatabaseService
     /// </summary>
     Task SetFolderCustomTitleAsync(string path, string? customTitle);
 
+    /// <summary>
+    /// Clears a folder's poster, but only when that poster is currently the user's own
+    /// (<see cref="PosterSource.Manual"/>), and returns the file name that was cleared so the caller
+    /// can delete it. Returns null, and changes nothing, when the folder has no row or its poster
+    /// came from anywhere else: an automatic, convention or online poster is not the user's to remove
+    /// and must survive.
+    /// <para>
+    /// The check and the clear are one immediate transaction. The poster could be replaced between
+    /// a read and a later write (a scrape landing while the user is in the dialog), and a clear that
+    /// trusted its own earlier read would wipe the newer poster. Only the poster columns change:
+    /// the custom title shares the row and is left alone.
+    /// </para>
+    /// </summary>
+    Task<string?> ClearManualFolderPosterAsync(string path);
+
     /// <summary>Removes folder metadata.</summary>
     Task DeleteFolderMetadataAsync(string path);
 

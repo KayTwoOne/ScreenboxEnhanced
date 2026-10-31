@@ -150,6 +150,50 @@ public sealed partial class DatabaseService
     }
 
     /// <inheritdoc/>
+    public async Task<string?> ClearManualFolderPosterAsync(string path)
+    {
+        await EnsureInitializedAsync();
+        using var connection = CreateConnection();
+
+        // Immediate, like SetFolderPosterAsync: the write lock is taken before the row is read, so
+        // the poster cannot change between the check and the clear. The UPDATE repeats the Manual
+        // condition rather than trusting the SELECT, and the file name is only reported when that
+        // UPDATE actually changed a row.
+        using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+
+        string? manualPosterFile;
+        using (SqliteCommand read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT poster_file FROM folder_metadata WHERE path = @path AND poster_source = @manual;";
+            read.Parameters.AddWithValue("@path", path);
+            read.Parameters.AddWithValue("@manual", (int)PosterSource.Manual);
+            manualPosterFile = read.ExecuteScalar() as string;
+        }
+
+        int cleared;
+        using (SqliteCommand write = connection.CreateCommand())
+        {
+            write.Transaction = transaction;
+
+            // Poster columns only: custom_title, provider_pin and sort_order share this row and
+            // belong to other writers.
+            write.CommandText = """
+                UPDATE folder_metadata
+                SET poster_file = NULL, poster_source = @none
+                WHERE path = @path AND poster_source = @manual;
+                """;
+            write.Parameters.AddWithValue("@path", path);
+            write.Parameters.AddWithValue("@none", (int)PosterSource.None);
+            write.Parameters.AddWithValue("@manual", (int)PosterSource.Manual);
+            cleared = write.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return cleared > 0 ? manualPosterFile : null;
+    }
+
+    /// <inheritdoc/>
     public async Task DeleteFolderMetadataAsync(string path)
     {
         await EnsureInitializedAsync();

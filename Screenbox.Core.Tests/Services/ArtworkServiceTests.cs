@@ -292,4 +292,107 @@ public sealed class ArtworkServiceTests
         await Assert.That(written).IsFalse();
         await Assert.That(artworkService.HasCreatedHttpClient).IsFalse();
     }
+    // ------------------------------------------------------------------
+    // RemoveManualPosterAsync: how a folder gets back to automatic, convention and online artwork.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task RemoveManualPosterAsync_ManualPoster_ClearsTheRowKeepsTheTitleAndDeletesTheFile()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        const string fileName = "m_remove_manual.jpg";
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderCustomTitleAsync(path, "Dandadan");
+        await db.SetFolderPosterAsync(path, fileName, PosterSource.Manual);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool removed = await artworkService.RemoveManualPosterAsync(path);
+
+        await Assert.That(removed).IsTrue();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.None);
+        await Assert.That(persisted.PosterFile).IsNull();
+        await Assert.That(persisted.CustomTitle).IsEqualTo("Dandadan");
+        await Assert.That(await artworkFolder.TryGetItemAsync(fileName)).IsNull()
+            .Because("The removed image must not be left behind on disk.");
+    }
+
+    [Test]
+    public async Task RemoveManualPosterAsync_PosterThatIsNotManual_ChangesNothingAndDeletesNothing()
+    {
+        // The file belongs to a poster the user did not choose. If the delete ran regardless of what
+        // the database operation decided, an automatic poster's image would vanish from under a row
+        // that still points at it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren";
+        const string fileName = "g_remove_auto.jpg";
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderPosterAsync(path, fileName, PosterSource.AutoFrame);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool removed = await artworkService.RemoveManualPosterAsync(path);
+
+        await Assert.That(removed).IsFalse();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.AutoFrame);
+        await Assert.That(persisted.PosterFile).IsEqualTo(fileName);
+        await Assert.That(await artworkFolder.TryGetItemAsync(fileName)).IsNotNull();
+    }
+
+    [Test]
+    public async Task RemoveManualPosterAsync_FolderOnceSearchedWithoutFindingArtwork_ResolvesAgain()
+    {
+        // A folder searched without finding anything is remembered for the session so scrolling back
+        // does not walk it again. Removing a poster must lift that, or the folder could stay blank
+        // after the removal even though artwork is now available for it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        using var artworkFixture = new TestDirectoryFixture();
+        using var libraryFixture = new TestDirectoryFixture();
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(libraryFixture.DirectoryPath);
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        // Nothing to show yet: the folder holds no video and no poster image, and is remembered as such.
+        await Assert.That(await artworkService.GetPosterFileNameAsync(folder, null)).IsNull();
+
+        // A manual poster is then set without going through the service (so the memory is not
+        // cleared by it), and a convention poster appears in the folder.
+        const string manualFile = "m_resolve_again.jpg";
+        await artworkFolder.CreateFileAsync(manualFile, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderPosterAsync(folder.Path, manualFile, PosterSource.Manual);
+        await File.WriteAllBytesAsync(Path.Combine(libraryFixture.DirectoryPath, "poster.jpg"), [1, 2, 3]);
+
+        await artworkService.RemoveManualPosterAsync(folder.Path);
+
+        FolderMetadataDto? afterRemoval = await db.LoadFolderMetadataAsync(folder.Path);
+        await Assert.That(afterRemoval!.PosterSource).IsEqualTo(PosterSource.None)
+            .Because("The manual poster is gone, so nothing pins the folder to it any more.");
+
+        string? resolved = await artworkService.GetPosterFileNameAsync(folder, afterRemoval);
+
+        await Assert.That(resolved).IsNotNull()
+            .Because("With the folder forgotten, the poster.jpg now sitting in it is found.");
+        await Assert.That(resolved).IsNotEqualTo(manualFile);
+        FolderMetadataDto? afterResolve = await db.LoadFolderMetadataAsync(folder.Path);
+        await Assert.That(afterResolve!.PosterSource).IsEqualTo(PosterSource.Convention);
+    }
 }

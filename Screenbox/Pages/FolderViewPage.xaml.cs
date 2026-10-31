@@ -1,7 +1,9 @@
 using CommunityToolkit.Mvvm.DependencyInjection;
 using CommunityToolkit.WinUI;
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml.Controls;
 using Screenbox.Behaviors;
+using Screenbox.Core.Helpers;
 using Screenbox.Core.ViewModels;
 using Screenbox.Dialogs;
 using Windows.Storage;
@@ -24,6 +26,7 @@ public sealed partial class FolderViewPage : Page
 
     public Visibility HeaderVisibility { get; private set; }
 
+    private readonly ILogger<FolderViewPage> _logger;
     private double _contentVerticalOffset;
     private ScrollViewer? _scrollViewer;
     private Windows.UI.Xaml.Controls.MenuFlyout? _folderFlyout;
@@ -31,6 +34,7 @@ public sealed partial class FolderViewPage : Page
     public FolderViewPage()
     {
         this.InitializeComponent();
+        _logger = DefaultLogging.CreateLogger<FolderViewPage>();
         DataContext = Ioc.Default.GetRequiredService<FolderViewPageViewModel>();
         Common = Ioc.Default.GetRequiredService<CommonViewModel>();
         FolderView.ChoosingItemContainer += FolderViewOnChoosingItemContainer;
@@ -127,19 +131,33 @@ public sealed partial class FolderViewPage : Page
         Common.SavePageState(e.NextView.VerticalOffset, nameof(FolderViewPage), Frame.BackStackDepth);
     }
 
+    // An exception escaping an async void handler terminates the app with no crash record, and
+    // there is plenty here that can throw: ContentDialog.ShowAsync throws when another dialog is
+    // already open, and the edit writes to the database and the artwork folder. A failed edit must
+    // only leave the folder as it was.
     [DynamicWindowsRuntimeCast(typeof(StorageFolder))]
     private async void EditFolder_OnClick(object sender, RoutedEventArgs e)
     {
-        StorageItemViewModel? item = ViewModel.ContextItem;
-        if (item?.StorageItem is not StorageFolder folder) return;
+        try
+        {
+            StorageItemViewModel? item = ViewModel.ContextItem;
+            if (item?.StorageItem is not StorageFolder folder) return;
 
-        var dialog = new EditFolderDialog(item.DisplayName);
-        EditFolderResult? result = await dialog.GetResultAsync();
-        if (result is null) return;
+            // The dialog offers to remove a custom image only if there is one, so it has to be told.
+            bool hasCustomImage = await ViewModel.HasManualPosterAsync(folder);
+            var dialog = new EditFolderDialog(item.DisplayName, hasCustomImage);
+            EditFolderResult? result = await dialog.GetResultAsync();
+            if (result is null) return;
 
-        await ViewModel.ApplyFolderEditAsync(folder, result.Title, result.Poster);
+            await ViewModel.ApplyFolderEditAsync(folder, result.Title, result.Poster, result.RemovePoster);
 
-        // The stored title and poster just changed, so bypass the per-item early-out.
-        await item.LoadArtworkAsync(force: true);
+            // The stored title and poster just changed, so bypass the per-item early-out. This also
+            // re-resolves artwork after a removal, so the folder falls back to automatic artwork.
+            await item.LoadArtworkAsync(force: true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to edit the folder.");
+        }
     }
 }

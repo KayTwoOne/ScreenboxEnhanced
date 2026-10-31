@@ -212,6 +212,50 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
     }
 
     /// <inheritdoc/>
+    public async Task<bool> RemoveManualPosterAsync(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return false;
+        }
+
+        string? removedFile;
+        try
+        {
+            // The database operation decides whether there was a manual poster at all, atomically,
+            // and says which file it pointed at. Nothing is deleted on any other basis: the file of
+            // a poster that was not cleared still has a row pointing at it.
+            removedFile = await _databaseService.ClearManualFolderPosterAsync(folderPath);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to remove the manual poster for '{Path}'.", folderPath);
+            return false;
+        }
+
+        // Whatever happened above, the folder gets resolved afresh the next time it is shown.
+        _foldersWithoutArtwork.TryRemove(folderPath, out _);
+
+        if (removedFile is not { Length: > 0 })
+        {
+            return false;
+        }
+
+        // The row no longer references the file, so failing to delete it only leaves an orphan.
+        try
+        {
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            await TryDeleteArtworkFileAsync(artworkFolder, removedFile);
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Removed the manual poster for '{Path}' but could not delete '{Name}'.", folderPath, removedFile);
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc/>
     public async Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(posterUrl))

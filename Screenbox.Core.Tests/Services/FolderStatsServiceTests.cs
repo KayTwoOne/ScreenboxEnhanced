@@ -146,6 +146,7 @@ public sealed class FolderStatsServiceTests
         public Task<List<FolderMetadataDto>> ListFolderMetadataAsync() => throw new NotSupportedException();
         public Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source) => throw new NotSupportedException();
         public Task SetFolderCustomTitleAsync(string path, string? customTitle) => throw new NotSupportedException();
+        public Task<string?> ClearManualFolderPosterAsync(string path) => throw new NotSupportedException();
         public Task DeleteFolderMetadataAsync(string path) => throw new NotSupportedException();
         public Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache) => throw new NotSupportedException();
         public Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path) => throw new NotSupportedException();
@@ -184,6 +185,7 @@ public sealed class FolderStatsServiceTests
         public Task<List<FolderMetadataDto>> ListFolderMetadataAsync() => throw new NotSupportedException();
         public Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source) => throw new NotSupportedException();
         public Task SetFolderCustomTitleAsync(string path, string? customTitle) => throw new NotSupportedException();
+        public Task<string?> ClearManualFolderPosterAsync(string path) => throw new NotSupportedException();
         public Task DeleteFolderMetadataAsync(string path) => throw new NotSupportedException();
         public Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache) => throw new NotSupportedException();
         public Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path) => throw new NotSupportedException();
