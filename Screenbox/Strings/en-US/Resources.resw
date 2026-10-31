@@ -885,7 +885,7 @@
     <value>Online metadata</value>
   </data>
   <data name="SettingsOnlineMetadataDescription" xml:space="preserve">
-    <value>Look up titles, synopses, and posters for your library folders from online sources. Off by default; nothing is sent online until you turn this on.</value>
+    <value>Find posters for your library folders from online sources. Your folder names are never changed. Off by default; nothing is sent online until you turn this on.</value>
   </data>
   <data name="SettingsMetadataProvidersHeader" xml:space="preserve">
     <value>Providers</value>

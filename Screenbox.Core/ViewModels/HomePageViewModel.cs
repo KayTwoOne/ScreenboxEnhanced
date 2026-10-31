@@ -98,7 +98,17 @@ public sealed partial class HomePageViewModel : ObservableRecipient,
 
     public async void OnLoaded()
     {
-        await UpdateContentAsync();
+        // async void: an exception escaping here ends the process with no crash record. The Recent
+        // list reads the system's most-recently-used list and resolves each entry to a file, and
+        // either can fail; the home page must still open.
+        try
+        {
+            await UpdateContentAsync();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to load home page content.");
+        }
     }
 
     private void Selection_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)

@@ -58,8 +58,18 @@ public sealed partial class FolderViewPage : Page
             _contentVerticalOffset = verticalOffset;
         }
 
-        await ViewModel.OnNavigatedTo(e.Parameter);
-        RestoreScrollVerticalOffset();
+        // async void: an exception escaping here ends the process with no crash record. Loading a
+        // folder enumerates the file system, which fails when a folder is deleted, a drive is
+        // unplugged or access is revoked - that must leave an empty page, not a closed app.
+        try
+        {
+            await ViewModel.OnNavigatedTo(e.Parameter);
+            RestoreScrollVerticalOffset();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to load the folder view.");
+        }
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
