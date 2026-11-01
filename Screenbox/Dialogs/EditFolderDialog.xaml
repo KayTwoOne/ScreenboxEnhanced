@@ -14,7 +14,8 @@
     Style="{StaticResource DefaultContentDialogStyle}"
     mc:Ignorable="d">
 
-    <StackPanel Spacing="12">
+    <!--  Fixed width: a dialog sized to its content widens as a long link is pasted or a note appears.  -->
+    <StackPanel Width="400" Spacing="12">
         <TextBox
             x:Name="TitleTextBox"
             MaxLength="200"
