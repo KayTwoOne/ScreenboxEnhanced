@@ -48,6 +48,11 @@ public sealed partial class MediaViewModel : ObservableRecipient
     public string TrackNumberText =>
         MediaInfo.MusicProperties.TrackNumber > 0 ? MediaInfo.MusicProperties.TrackNumber.ToString() : string.Empty;    // Helper for binding
 
+    /// <summary>
+    /// Whether the in-progress indicator should be shown for this item: partially watched, but not finished.
+    /// </summary>
+    public bool ShouldShowProgress => !IsWatched && WatchProgress > 0;
+
     public BitmapImage? Thumbnail
     {
         get
@@ -86,6 +91,14 @@ public sealed partial class MediaViewModel : ObservableRecipient
 
     [ObservableProperty]
     public partial bool IsPlaying { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShouldShowProgress))]
+    public partial bool IsWatched { get; set; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShouldShowProgress))]
+    public partial double WatchProgress { get; set; }
 
     private WeakReference<BitmapImage>? _thumbnailRef;
 
@@ -319,6 +332,16 @@ public sealed partial class MediaViewModel : ObservableRecipient
                 DecodePixelHeight = 300
             };
         }
+    }
+
+    /// <summary>
+    /// Refreshes watched state from the in-memory cache. Cheap and synchronous by design:
+    /// this runs per tile as items scroll into view.
+    /// </summary>
+    public void RefreshWatchState(IWatchStateService watchStateService)
+    {
+        IsWatched = watchStateService.IsWatched(Location);
+        WatchProgress = watchStateService.GetProgress(Location);
     }
 
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]

@@ -118,10 +118,10 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="AppDisplayName" xml:space="preserve">
-    <value>Screenbox</value>
+    <value>Screenbox Enhanced</value>
   </data>
   <data name="AppShortName" xml:space="preserve">
-    <value>Screenbox</value>
+    <value>Screenbox Enhanced</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
     <value>Um leitor de vídeo moderno, focado no desempenho e na facilidade de utilização numa ampla variedade de dispositivos Windows.</value>

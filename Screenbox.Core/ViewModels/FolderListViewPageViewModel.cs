@@ -8,10 +8,16 @@ public sealed partial class FolderListViewPageViewModel : FolderViewPageViewMode
 {
     private readonly INavigationService _navigationService;
 
+    // artworkService and databaseService are unused here on purpose: this type exists only so the
+    // navigation service can match on it, and every parameter below the navigation service is
+    // forwarded straight to the base constructor, which owns the folder identity behaviour.
     public FolderListViewPageViewModel(IFilesService filesService,
         INavigationService navigationService,
-        StorageItemViewModelFactory storageVmFactory) :
-        base(filesService, navigationService, storageVmFactory)
+        StorageItemViewModelFactory storageVmFactory,
+        IArtworkService artworkService,
+        IDatabaseService databaseService,
+        IFolderStatsService folderStatsService) :
+        base(filesService, navigationService, storageVmFactory, artworkService, databaseService, folderStatsService)
     {
         _navigationService = navigationService;
     }

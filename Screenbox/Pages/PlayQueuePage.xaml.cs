@@ -1,4 +1,7 @@
+using System;
 using CommunityToolkit.Mvvm.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Screenbox.Core.Helpers;
 using Screenbox.Core.ViewModels;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -25,6 +28,15 @@ public sealed partial class PlayQueuePage : Page
 
     private async void PlayQueuePage_OnLoaded(object sender, RoutedEventArgs e)
     {
-        await PlayQueue.SmoothScrollActiveItemIntoViewAsync();
+        // async void: scrolling the active item into view is cosmetic, so a failure here must not
+        // end the process, which is what an exception escaping an async void handler does.
+        try
+        {
+            await PlayQueue.SmoothScrollActiveItemIntoViewAsync();
+        }
+        catch (Exception ex)
+        {
+            DefaultLogging.CreateLogger<PlayQueuePage>().LogError(ex, "Failed to scroll the active queue item into view.");
+        }
     }
 }

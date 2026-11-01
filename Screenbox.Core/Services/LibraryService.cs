@@ -27,15 +27,18 @@ public sealed class LibraryService : ILibraryService
     private readonly ISettingsService _settingsService;
     private readonly IFilesService _filesService;
     private readonly IDatabaseService _databaseService;
+    private readonly IArtworkService _artworkService;
     private readonly MediaViewModelFactory _mediaFactory;
     private readonly ILogger<LibraryService> _logger;
 
     public LibraryService(ISettingsService settingsService, IFilesService filesService,
-        IDatabaseService databaseService, MediaViewModelFactory mediaFactory, ILogger<LibraryService> logger)
+        IDatabaseService databaseService, IArtworkService artworkService,
+        MediaViewModelFactory mediaFactory, ILogger<LibraryService> logger)
     {
         _settingsService = settingsService;
         _filesService = filesService;
         _databaseService = databaseService;
+        _artworkService = artworkService;
         _mediaFactory = mediaFactory;
         _logger = logger;
     }
@@ -140,6 +143,11 @@ public sealed class LibraryService : ILibraryService
                     {
                         _logger.LogError(e, "Failed to resolve music library changes from the change tracker.");
                     }
+
+                    if (hasCache && !await IsCacheCurrentAsync(libraryQuery, library, songs))
+                    {
+                        hasCache = false;
+                    }
                 }
             }
         }
@@ -238,6 +246,11 @@ public sealed class LibraryService : ILibraryService
                     catch (Exception e)
                     {
                         _logger.LogError(e, "Failed to resolve video library changes from the change tracker.");
+                    }
+
+                    if (hasCache && !await IsCacheCurrentAsync(libraryQuery, library, videos))
+                    {
+                        hasCache = false;
                     }
                 }
             }
@@ -481,6 +494,11 @@ public sealed class LibraryService : ILibraryService
         try
         {
             await _databaseService.SaveVideoCacheAsync(folderPaths, snapshot);
+
+            // The library has just been walked, so this is the one point where folders that are
+            // gone can be told apart from folders that are merely not on screen. Folder metadata is
+            // keyed on absolute path and would otherwise accumulate rows and artwork files forever.
+            await _artworkService.PruneOrphanedArtworkAsync(folderPaths);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -684,6 +702,56 @@ public sealed class LibraryService : ILibraryService
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Checks the cache against the library's actual file count, after the change tracker has had
+    /// its say.
+    /// </summary>
+    /// <remarks>
+    /// The change tracker can report no changes at all (<c>GetLastChangeId()</c> returns 0) when
+    /// files were added: on an NTFS data drive, 29 new episodes in three new folders went
+    /// unreported. Trusting that answer alone meant new media was never discovered for as long as
+    /// a cache existed - no library entry, no folder statistics, no watch tracking. Counting the
+    /// query is cheap next to a rescan, and catches any addition or deletion the tracker missed.
+    /// Anything that prevents the check falls back to a rescan, which is the safe direction.
+    /// </remarks>
+    private async Task<bool> IsCacheCurrentAsync(
+        StorageFileQueryResult libraryQuery, StorageLibrary library, IReadOnlyCollection<MediaViewModel> cached)
+    {
+        try
+        {
+            uint onDisk = await libraryQuery.GetItemCountAsync();
+            int inCache = CountUnderFolders(library.Folders.Select(f => f.Path), cached.Select(m => m.Location));
+            if (onDisk == inCache) return true;
+
+            _logger.LogInformation(
+                "Library cache is stale ({OnDisk} files on disk, {InCache} cached); rescanning.", onDisk, inCache);
+            return false;
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Could not verify the library cache against the file system; rescanning.");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Counts the locations that sit inside at least one of <paramref name="folders"/>.
+    /// </summary>
+    /// <remarks>
+    /// Removable-storage items share the cache but not the library query, so they must not count
+    /// toward the comparison. Each folder is matched with a trailing separator so that
+    /// <c>D:\Media\Anime</c> does not claim <c>D:\Media\Anime2</c>. Library folders can nest,
+    /// so a location is counted once however many folders contain it.
+    /// </remarks>
+    internal static int CountUnderFolders(IEnumerable<string> folders, IEnumerable<string> locations)
+    {
+        string[] roots = folders
+            .Where(folder => !string.IsNullOrEmpty(folder))
+            .Select(folder => folder.TrimEnd('\\', '/') + "\\")
+            .ToArray();
+        return locations.Count(location => roots.Any(root => location.StartsWith(root, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool AreLibraryPathsChanged(IReadOnlyCollection<string> cachedFolderPaths, StorageLibrary library)

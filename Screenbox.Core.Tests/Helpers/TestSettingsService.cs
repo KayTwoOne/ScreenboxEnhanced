@@ -1,4 +1,5 @@
 using Screenbox.Core.Enums;
+using Screenbox.Core.Helpers;
 using Screenbox.Core.Services;
 using Windows.Media;
 
@@ -40,4 +41,10 @@ public class TestSettingsService : ISettingsService
     public bool PlayerGesturePressAndHold { get; set; } = true;
     public SongSortOrder PersistentSongsSortOrder { get; set; } = SongSortOrder.Title;
     public AlbumSortOrder PersistentAlbumsSortOrder { get; set; } = AlbumSortOrder.Title;
+    public double WatchedThresholdPercent { get; set; } = WatchThreshold.DefaultPercent;
+    public bool MetadataEnabled { get; set; }
+    public bool MetadataUseAniList { get; set; }
+    public bool MetadataUseJikan { get; set; }
+    public bool MetadataUseTmdb { get; set; }
+    public string TmdbApiKey { get; set; } = string.Empty;
 }

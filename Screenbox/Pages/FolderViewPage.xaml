@@ -51,6 +51,14 @@
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
+                <MenuFlyoutItem
+                    Command="{x:Bind Common.ToggleWatchedCommand}"
+                    CommandParameter="{x:Bind ViewModel.ContextItem.Media, Mode=OneWay}"
+                    Text="{x:Bind helpers:ItemLabelHelper.GetWatchedToggleLabel(ViewModel.ContextItem.Media.IsWatched), Mode=OneWay}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind converters:GlyphConverter.ToWatchedToggleGlyph(ViewModel.ContextItem.Media.IsWatched), Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
                 <MenuFlyoutSubItem x:Name="AddToPlaylistSubMenu" Text="{x:Bind strings:Resources.AddToPlaylist}">
                     <MenuFlyoutSubItem.Icon>
                         <FontIcon
@@ -144,16 +152,19 @@
             <GridView.ItemTemplate>
                 <DataTemplate x:DataType="viewModels:StorageItemViewModel">
                     <controls:CommonGridViewItem
-                        Title="{x:Bind Name, Mode=OneWay}"
+                        Title="{x:Bind DisplayName, Mode=OneWay}"
                         Width="{StaticResource WideGridViewItemWidth}"
                         AutomationProperties.Name="{x:Bind helpers:ItemLabelHelper.FormatAccessibleStorageItemName(IsFile, Name, CaptionText, ItemCount), Mode=OneWay}"
                         CanPlay="{x:Bind IsFile}"
-                        Caption="{x:Bind helpers:ItemLabelHelper.GetStorageItemCaption(IsFile, CaptionText, ItemCount), Mode=OneWay}"
+                        Caption="{x:Bind helpers:ItemLabelHelper.GetStorageItemCaption(IsFile, CaptionText, ItemCount, Stats), Mode=OneWay}"
                         IsPlaying="{x:Bind Media.IsPlaying, Mode=OneWay}"
+                        IsWatched="{x:Bind Media.IsWatched, Mode=OneWay}"
                         PlayCommand="{StaticResource MediaListViewItemPlayCommand}"
                         PlayCommandParameter="{x:Bind}"
+                        ShouldShowProgress="{x:Bind Media.ShouldShowProgress, Mode=OneWay}"
                         ThumbnailHeight="{StaticResource WideGridViewItemThumbnailHeight}"
-                        ThumbnailSource="{x:Bind Media.Thumbnail, Mode=OneWay, FallbackValue={x:Null}}">
+                        ThumbnailSource="{x:Bind Thumbnail, Mode=OneWay, FallbackValue={x:Null}}"
+                        WatchProgress="{x:Bind Media.WatchProgress, Mode=OneWay}">
                         <controls:CommonGridViewItem.PlaceholderIconSource>
                             <FontIconSource FontSize="{StaticResource WideGridItemPlaceholderIconFontSize}" Glyph="{x:Bind converters:GlyphConverter.ToStorageItemGlyph(StorageItem)}" />
                         </controls:CommonGridViewItem.PlaceholderIconSource>

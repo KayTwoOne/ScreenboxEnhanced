@@ -270,6 +270,73 @@
                     </ctc:SettingsExpander.Items>
                 </ctc:SettingsExpander>
 
+                <ctc:SettingsExpander
+                    Margin="{StaticResource SettingsCardMargin}"
+                    Description="{x:Bind strings:Resources.SettingsOnlineMetadataDescription}"
+                    Header="{x:Bind strings:Resources.SettingsOnlineMetadataHeader}"
+                    HeaderIcon="{ui:FontIcon Glyph=&#xE774;}"
+                    IsExpanded="{x:Bind MetadataEnabledToggleSwitch.IsOn, Mode=OneWay}">
+                    <interactivity:Interaction.Behaviors>
+                        <behaviors:SettingsExpanderXYNavigationBehavior />
+                    </interactivity:Interaction.Behaviors>
+                    <ToggleSwitch
+                        x:Name="MetadataEnabledToggleSwitch"
+                        AutomationProperties.HelpText="{x:Bind strings:Resources.SettingsOnlineMetadataDescription}"
+                        IsOn="{x:Bind ViewModel.MetadataEnabled, Mode=TwoWay}" />
+                    <ctc:SettingsExpander.Items>
+                        <ctc:SettingsCard
+                            ContentAlignment="Left"
+                            Header="{x:Bind strings:Resources.SettingsMetadataProvidersHeader}"
+                            IsEnabled="{x:Bind MetadataEnabledToggleSwitch.IsOn, Mode=OneWay}">
+                            <StackPanel Orientation="Vertical" Spacing="8">
+                                <CheckBox Content="{x:Bind strings:Resources.SettingsMetadataUseAniListHeader}" IsChecked="{x:Bind ViewModel.MetadataUseAniList, Mode=TwoWay}" />
+                                <CheckBox Content="{x:Bind strings:Resources.SettingsMetadataUseJikanHeader}" IsChecked="{x:Bind ViewModel.MetadataUseJikan, Mode=TwoWay}" />
+                                <CheckBox Content="{x:Bind strings:Resources.SettingsMetadataUseTmdbHeader}" IsChecked="{x:Bind ViewModel.MetadataUseTmdb, Mode=TwoWay}" />
+                            </StackPanel>
+                        </ctc:SettingsCard>
+                        <ctc:SettingsCard
+                            x:Name="TmdbApiKeyCard"
+                            ContentAlignment="Left"
+                            Header="{x:Bind strings:Resources.SettingsMetadataTmdbApiKeyHeader}"
+                            IsEnabled="{x:Bind MetadataEnabledToggleSwitch.IsOn, Mode=OneWay}">
+                            <StackPanel Orientation="Vertical" Spacing="4">
+                                <PasswordBox
+                                    x:Name="TmdbApiKeyPasswordBox"
+                                    MinWidth="220"
+                                    AutomationProperties.Name="{x:Bind TmdbApiKeyCard.Header}"
+                                    Password="{x:Bind ViewModel.TmdbApiKey, Mode=TwoWay}"
+                                    PlaceholderText="{x:Bind strings:Resources.SettingsMetadataTmdbApiKeyPlaceholder}" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind strings:Resources.SettingsMetadataTmdbApiKeyDescription}" />
+                            </StackPanel>
+                        </ctc:SettingsCard>
+                        <ctc:SettingsCard
+                            x:Name="ScanLibraryNowCard"
+                            ContentAlignment="Left"
+                            Header="{x:Bind strings:Resources.SettingsMetadataScanNowHeader}"
+                            IsEnabled="{x:Bind MetadataEnabledToggleSwitch.IsOn, Mode=OneWay}">
+                            <ctc:SettingsCard.Description>
+                                <TextBlock Text="{x:Bind strings:Resources.SettingsMetadataScanNowDescription}" />
+                            </ctc:SettingsCard.Description>
+                            <StackPanel MinWidth="160" Orientation="Vertical" Spacing="4">
+                                <Button
+                                    x:Name="ScanLibraryNowButton"
+                                    MinWidth="{StaticResource SettingsCardButtonMinWidth}"
+                                    AutomationProperties.HelpText="{x:Bind strings:Resources.SettingsMetadataScanNowDescription}"
+                                    AutomationProperties.Name="{x:Bind ScanLibraryNowCard.Header}"
+                                    Command="{x:Bind ViewModel.ScanLibraryMetadataCommand}"
+                                    Content="{x:Bind strings:Resources.SettingsMetadataScanNowHeader}" />
+                                <muxc:ProgressBar
+                                    Maximum="100"
+                                    Value="{x:Bind ViewModel.MetadataScanProgress, Mode=OneWay}"
+                                    Visibility="{x:Bind ViewModel.IsScanningLibraryMetadata, Mode=OneWay}" />
+                            </StackPanel>
+                        </ctc:SettingsCard>
+                    </ctc:SettingsExpander.Items>
+                </ctc:SettingsExpander>
+
                 <!--  Personalization section  -->
                 <TextBlock Style="{StaticResource SettingsSectionHeaderTextBlockStyle}" Text="{x:Bind strings:Resources.SettingsCategoryPersonalization}" />
 
@@ -733,7 +800,7 @@
 
                 <ctc:SettingsExpander
                     Margin="{StaticResource SettingsCardMargin}"
-                    Description="Made with ❤️ by Tung Huynh"
+                    Description="{x:Bind strings:Resources.AboutBasedOn}"
                     Header="{x:Bind strings:Resources.AppFriendlyName}"
                     HeaderIcon="{ui:BitmapIcon Source=ms-appx:///Assets/StoreLogo.png}">
                     <TextBlock
@@ -743,10 +810,19 @@
                     <ctc:SettingsExpander.Items>
                         <ctc:SettingsCard HorizontalContentAlignment="Left" ContentAlignment="Vertical">
                             <StackPanel Margin="{StaticResource HyperlinkButtonInlineMargin}" Orientation="Vertical">
-                                <HyperlinkButton Content="{x:Bind strings:Resources.PrivacyPolicy}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/PRIVACY.md" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.License}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/LICENSE" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.ThirdPartyNotices}" NavigateUri="https://github.com/huynhsontung/Screenbox/blob/main/NOTICE.md" />
-                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSourceCode}" NavigateUri="https://github.com/huynhsontung/Screenbox" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.PrivacyPolicy}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/PRIVACY.md" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.License}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/LICENSE" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.ThirdPartyNotices}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/blob/main/NOTICE.md" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSourceCode}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced" />
+                                <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkOriginalProject}" NavigateUri="https://github.com/huynhsontung/Screenbox" />
+                                <TextBlock
+                                    Margin="12,8,0,4"
+                                    MaxWidth="560"
+                                    HorizontalAlignment="Left"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind strings:Resources.AboutMetadataAttribution}"
+                                    TextWrapping="Wrap" />
                             </StackPanel>
                         </ctc:SettingsCard>
                     </ctc:SettingsExpander.Items>
@@ -757,8 +833,8 @@
                     Padding="{StaticResource HyperlinkButtonInlineMargin}"
                     Orientation="Vertical"
                     XYFocusKeyboardNavigation="Enabled">
-                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkDiscord}" NavigateUri="https://discord.gg/HZPZXjANxz" />
-                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSponsor}" NavigateUri="https://github.com/sponsors/huynhsontung" />
+                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkReportIssue}" NavigateUri="https://github.com/KayTwoOne/ScreenboxEnhanced/issues" />
+                    <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkSupportOriginalAuthor}" NavigateUri="https://github.com/sponsors/huynhsontung" />
                     <HyperlinkButton Content="{x:Bind strings:Resources.HyperlinkTranslate}" NavigateUri="https://crowdin.com/project/screenbox" />
                 </StackPanel>
 

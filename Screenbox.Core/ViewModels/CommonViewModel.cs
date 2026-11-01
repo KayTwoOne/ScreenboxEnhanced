@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using CommunityToolkit.Mvvm.Messaging.Messages;
+using Microsoft.Extensions.Logging;
 using Screenbox.Core.Contexts;
 using Screenbox.Core.Enums;
 using Screenbox.Core.Helpers;
@@ -35,19 +36,25 @@ public sealed partial class CommonViewModel : ObservableRecipient,
     private readonly ISettingsService _settingsService;
     private readonly IPlaylistService _playlistService;
     private readonly PlaylistsContext _playlistsContext;
+    private readonly WatchStateContext _watchStateContext;
+    private readonly ILogger<CommonViewModel> _logger;
     private readonly Dictionary<string, object> _pageStates;
 
     public CommonViewModel(INavigationService navigationService,
         IFilesService filesService,
         ISettingsService settingsService,
         IPlaylistService playlistService,
-        PlaylistsContext playlistsContext)
+        PlaylistsContext playlistsContext,
+        WatchStateContext watchStateContext,
+        ILogger<CommonViewModel> logger)
     {
         _navigationService = navigationService;
         _filesService = filesService;
         _settingsService = settingsService;
         _playlistService = playlistService;
         _playlistsContext = playlistsContext;
+        _watchStateContext = watchStateContext;
+        _logger = logger;
         NavigationViewDisplayMode = Messenger.Send<NavigationViewDisplayModeRequestMessage>();
         NavigationStates = new Dictionary<Type, string>();
         _pageStates = new Dictionary<string, object>();
@@ -107,6 +114,30 @@ public sealed partial class CommonViewModel : ObservableRecipient,
     private void AddToQueue(MediaViewModel media)
     {
         Messenger.SendAddToQueue(media);
+    }
+
+    /// <summary>
+    /// Marks the item watched, or unwatched when it already is. Every page's Mark as watched /
+    /// unwatched menu item binds here, and the work is done by
+    /// <see cref="WatchStateContext.SetWatchedAsync"/>, so the reaction to the change (the item, the
+    /// folder counts, Continue Watching) lives in one place instead of in each page's view model.
+    /// </summary>
+    /// <param name="media">The item the menu was opened on.</param>
+    [RelayCommand]
+    private async Task ToggleWatchedAsync(MediaViewModel? media)
+    {
+        if (media is null) return;
+
+        try
+        {
+            // The same property the menu item's label is bound to, so the two cannot disagree.
+            await _watchStateContext.SetWatchedAsync(media, !media.IsWatched);
+        }
+        catch (Exception e)
+        {
+            // Raised from a menu item, where nothing awaits this: nothing may escape.
+            _logger.LogError(e, "Failed to change the watched state of '{Location}'.", media.Location);
+        }
     }
 
     [RelayCommand]

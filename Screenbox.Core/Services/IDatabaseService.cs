@@ -7,7 +7,10 @@ namespace Screenbox.Core.Services;
 
 /// <summary>
 /// Manages the application's SQLite database.
-/// The database acts as a quick cache layer; data loss is handled gracefully by recreating the database.
+/// Most tables are a quick cache layer that can be rebuilt by rescanning the libraries, but
+/// <c>playlists</c>, <c>playlist_items</c> and <c>folder_metadata</c> hold durable, user-authored
+/// data that cannot be reconstructed. Schema changes migrate those tables rather than dropping
+/// them; whole-file recovery from a corrupt database still loses them.
 /// </summary>
 public interface IDatabaseService
 {
@@ -45,4 +48,80 @@ public interface IDatabaseService
 
     /// <summary>Deletes a playlist and cascades to its items.</summary>
     Task DeletePlaylistAsync(string id);
+
+    /// <summary>
+    /// Saves durable, user-authored metadata for a single folder, replacing the whole row.
+    /// Prefer <see cref="SetFolderPosterAsync"/> or <see cref="SetFolderCustomTitleAsync"/> when
+    /// only some columns are owned by the caller: a full-row write built from a stale read
+    /// silently discards whatever another writer changed in the meantime.
+    /// </summary>
+    Task SaveFolderMetadataAsync(FolderMetadataDto metadata);
+
+    /// <summary>Loads folder metadata, or null when the folder has none.</summary>
+    Task<FolderMetadataDto?> LoadFolderMetadataAsync(string path);
+
+    /// <summary>Lists every stored folder metadata row, for maintenance such as evicting orphans.</summary>
+    Task<List<FolderMetadataDto>> ListFolderMetadataAsync();
+
+    /// <summary>
+    /// Records a folder's poster without reading or rewriting any other column, creating the row
+    /// when it does not exist. Returns the poster file name that was stored before, or null when
+    /// there was none, so the caller can delete the superseded file.
+    /// </summary>
+    Task<string?> SetFolderPosterAsync(string path, string posterFile, PosterSource source);
+
+    /// <summary>
+    /// Sets a folder's custom display title, or clears it when <paramref name="customTitle"/> is
+    /// null, without touching any other column.
+    /// </summary>
+    Task SetFolderCustomTitleAsync(string path, string? customTitle);
+
+    /// <summary>
+    /// Clears a folder's poster, but only when that poster is currently the user's own
+    /// (<see cref="PosterSource.Manual"/>), and returns the file name that was cleared so the caller
+    /// can delete it. Returns null, and changes nothing, when the folder has no row or its poster
+    /// came from anywhere else: an automatic, convention or online poster is not the user's to remove
+    /// and must survive.
+    /// <para>
+    /// The check and the clear are one immediate transaction. The poster could be replaced between
+    /// a read and a later write (a scrape landing while the user is in the dialog), and a clear that
+    /// trusted its own earlier read would wipe the newer poster. Only the poster columns change:
+    /// the custom title shares the row and is left alone.
+    /// </para>
+    /// </summary>
+    Task<string?> ClearManualFolderPosterAsync(string path);
+
+    /// <summary>Removes folder metadata.</summary>
+    Task DeleteFolderMetadataAsync(string path);
+
+    /// <summary>
+    /// Saves disposable, refetchable online-metadata cache for a single folder, replacing the whole
+    /// row. Unlike <see cref="SaveFolderMetadataAsync"/>, nothing here is user-authored, so the
+    /// backing table is dropped and recreated on schema drift rather than migrated in place.
+    /// </summary>
+    Task SaveScrapeCacheAsync(FolderScrapeCacheDto cache);
+
+    /// <summary>Loads a folder's scrape cache entry, or null when the folder has none.</summary>
+    Task<FolderScrapeCacheDto?> LoadScrapeCacheAsync(string path);
+
+    /// <summary>
+    /// Empties the entire scrape cache table. This never touches <c>folder_metadata</c>, which holds
+    /// the durable, user-authored data (custom titles, manual posters) that a scrape must not clobber.
+    /// </summary>
+    Task ClearScrapeCacheAsync();
+
+    /// <summary>Saves durable watched state for a media location.</summary>
+    Task SaveWatchStateAsync(WatchStateDto state);
+
+    /// <summary>Loads watched state, or null when the location has none.</summary>
+    Task<WatchStateDto?> LoadWatchStateAsync(string location);
+
+    /// <summary>Lists all watched state rows.</summary>
+    Task<List<WatchStateDto>> ListWatchStateAsync();
+
+    /// <summary>Removes watched state for a location.</summary>
+    Task DeleteWatchStateAsync(string location);
+
+    /// <summary>Returns aggregate media statistics for a library folder.</summary>
+    Task<FolderStats> GetFolderStatsAsync(string folderPath);
 }

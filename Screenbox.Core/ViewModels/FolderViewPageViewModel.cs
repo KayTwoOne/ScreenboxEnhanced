@@ -7,9 +7,11 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
 using CommunityToolkit.WinUI;
+using Screenbox.Core.Enums;
 using Screenbox.Core.Factories;
 using Screenbox.Core.Helpers;
 using Screenbox.Core.Messages;
+using Screenbox.Core.Models;
 using Screenbox.Core.Services;
 using Windows.Storage;
 using Windows.Storage.Search;
@@ -39,6 +41,9 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private readonly IFilesService _filesService;
     private readonly INavigationService _navigationService;
     private readonly StorageItemViewModelFactory _storageVmFactory;
+    private readonly IArtworkService _artworkService;
+    private readonly IDatabaseService _databaseService;
+    private readonly IFolderStatsService _folderStatsService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _loadingTimer;
     private readonly List<MediaViewModel> _playableItems = [];
@@ -46,11 +51,15 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     private object? _source;
 
     public FolderViewPageViewModel(IFilesService filesService, INavigationService navigationService,
-        StorageItemViewModelFactory storageVmFactory)
+        StorageItemViewModelFactory storageVmFactory, IArtworkService artworkService, IDatabaseService databaseService,
+        IFolderStatsService folderStatsService)
     {
         _filesService = filesService;
         _storageVmFactory = storageVmFactory;
         _navigationService = navigationService;
+        _artworkService = artworkService;
+        _databaseService = databaseService;
+        _folderStatsService = folderStatsService;
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _loadingTimer = _dispatcherQueue.CreateTimer();
 
@@ -60,6 +69,12 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     public void Receive(RefreshFolderMessage message)
     {
         if (!_isActive) return;
+        // Watch state (and possibly the library itself) may have changed since the cache was
+        // filled, so drop it here, right before the view re-reads its items. The next per-tile
+        // stats request recomputes. This is an accepted limitation: counts refresh when the
+        // folder view refreshes, not the instant an episode crosses the watched threshold
+        // mid-playback.
+        _folderStatsService.Invalidate();
         _dispatcherQueue.TryEnqueue(RefreshFolderContent);
     }
 
@@ -130,6 +145,43 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
     public void OnNavigatedFrom()
     {
         _isActive = false;
+    }
+
+    /// <summary>
+    /// Persists an edited folder title and, when supplied, a new manual poster, or removes the
+    /// existing manual poster when <paramref name="removePoster"/> is set.
+    /// An empty title, or a title that matches the folder's on-disk name, clears the custom
+    /// title so the folder name is used again (and stays in sync if the folder is later renamed).
+    /// A chosen <paramref name="poster"/> wins over <paramref name="removePoster"/>: replacing the
+    /// old image already removes it.
+    /// </summary>
+    public async Task ApplyFolderEditAsync(StorageFolder folder, string title, StorageFile? poster, bool removePoster)
+    {
+        // Writes the title column only. Reading the row, editing it in memory and writing it back
+        // whole would race the artwork writer, which shares this row, and would undo a poster
+        // recorded while the dialog was open.
+        bool isDefaultTitle = string.IsNullOrWhiteSpace(title) || title == folder.Name;
+        await _databaseService.SetFolderCustomTitleAsync(folder.Path, isDefaultTitle ? null : title);
+
+        if (poster is not null)
+        {
+            await _artworkService.SetManualPosterAsync(folder, poster);
+        }
+        else if (removePoster)
+        {
+            await _artworkService.RemoveManualPosterAsync(folder.Path);
+        }
+    }
+
+    /// <summary>
+    /// Whether the folder's stored poster is one the user chose themselves. The edit dialog offers
+    /// to remove a custom image only when this is true, because a manual poster is the only kind
+    /// that removal applies to and the only kind nothing else can ever replace.
+    /// </summary>
+    public async Task<bool> HasManualPosterAsync(StorageFolder folder)
+    {
+        FolderMetadataDto? metadata = await _databaseService.LoadFolderMetadataAsync(folder.Path);
+        return metadata is { PosterSource: PosterSource.Manual };
     }
 
     protected virtual void Navigate(object? parameter = null)
@@ -219,6 +271,41 @@ public partial class FolderViewPageViewModel : ObservableRecipient,
                 Items.Add(item);
                 if (item.Media != null) _playableItems.Add(item.Media);
             }
+        }
+
+        // Separate folders (keep in original order) and files (sort by episode)
+        List<StorageItemViewModel> folders = [];
+        List<StorageItemViewModel> files = [];
+        foreach (StorageItemViewModel item in Items)
+        {
+            if (item.IsFile)
+                files.Add(item);
+            else
+                folders.Add(item);
+        }
+
+        // Sort files using EpisodeComparer
+        files.Sort((a, b) => EpisodeComparer.Instance.Compare(a.Name, b.Name));
+
+        // Rebuild: folders first, then sorted files
+        List<StorageItemViewModel> ordered = [..folders, ..files];
+
+        // Only rebuild Items if order actually changed
+        if (!ordered.SequenceEqual(Items))
+        {
+            Items.Clear();
+            foreach (StorageItemViewModel item in ordered)
+                Items.Add(item);
+        }
+
+        // Always rebuild _playableItems from the sorted order to match Items.
+        // This ensures the queue follows the same ordering as the UI, so when a user
+        // finishes playing one episode, the next one in the queue is the next one on screen.
+        _playableItems.Clear();
+        foreach (StorageItemViewModel item in ordered)
+        {
+            if (item.Media != null)
+                _playableItems.Add(item.Media);
         }
 
         _loadingTimer.Stop();

@@ -208,7 +208,7 @@ Screenbox implements a comprehensive service-oriented architecture using [Micros
 - **`ISystemMediaTransportControlsService`**: Windows media key integration
 
 **Persistence Services**
-- **`IDatabaseService`**: Low-level SQLite database management. Opens (or creates) `screenbox.db` in `ApplicationData.Current.LocalFolder`, applies the schema on first open, and exposes `CreateConnection()` for typed data access. Automatically recovers from database corruption by deleting and recreating the file — data loss is acceptable because the database is a cache layer. Registered as a singleton and initialized early at app startup.
+- **`IDatabaseService`**: Low-level SQLite database management. Opens (or creates) `screenbox.db` in `ApplicationData.Current.LocalFolder`, applies the schema on first open, and exposes `CreateConnection()` for typed data access. Routine schema changes migrate the durable tables in place; a database that cannot be opened at all is still recovered by deleting and recreating the file, which does lose the durable tables (see [SQLite Database Schema](#sqlite-database-schema)). Registered as a singleton and initialized early at app startup.
 - **`IPlaybackProgressTracker`**: Tracks and persists the playback progress for each media item, enabling resume-from-position functionality. Handles the `SuspendingMessage` to flush state to the database on app suspension.
 
 **System Integration Services**
@@ -285,15 +285,22 @@ The playback engine provides a clean interface for the ViewModel layer while abs
 
 #### SQLite Database Schema
 
-All media-library state is stored in `screenbox.db` (SQLite, `LocalFolder`). The database acts as a **disposable cache** — the app recreates it from scratch if the file is missing or corrupted.
+All media-library state is stored in `screenbox.db` (SQLite, `LocalFolder`). Most of it is a **disposable cache** that the app rebuilds by rescanning the libraries, but the file also holds durable, user-authored data that no rescan can reconstruct.
 
-| Table | Purpose |
-|---|---|
-| `library_folders` | Tracks which folders belong to the music and video libraries |
-| `media_records` | Caches media-file metadata indexed by path; queried instead of crawling disk on subsequent launches |
-| `playback_progress` | Stores the last playback position per media location for resume-from-position |
-| `playlists` | One row per saved playlist (id, display name, last-updated timestamp) |
-| `playlist_items` | Ordered list of media snapshots for each playlist; cascade-deleted with the parent playlist |
+| Table | Durability | Purpose |
+|---|---|---|
+| `library_folders` | Cache | Tracks which folders belong to the music and video libraries |
+| `media_records` | Cache | Caches media-file metadata indexed by path; queried instead of crawling disk on subsequent launches |
+| `playback_progress` | Cache | Stores the last playback position per media location for resume-from-position |
+| `playlists` | Durable | One row per saved playlist (id, display name, last-updated timestamp) |
+| `playlist_items` | Durable | Ordered list of media snapshots for each playlist; cascade-deleted with the parent playlist |
+| `folder_metadata` | Durable | Custom folder display titles and poster choices, keyed on absolute folder path |
+
+**Durability in practice.** `folder_metadata` stores work the user did by hand — renaming a folder for display, picking a poster image — that exists nowhere else on disk. Losing a row is permanent data loss, not a cache miss.
+
+- *What protects it*: schema drift on `folder_metadata` is migrated, never dropped. Missing columns are added with `ALTER TABLE ... ADD COLUMN`; drift that additive migration cannot express rebuilds the table by copying the existing rows into the new shape. The column list in `DatabaseService.Schema.cs` drives both the CREATE and the ALTER statements, so the two cannot drift apart.
+- *What does not protect it*: `RecreateDatabaseFile` deletes the whole database file when initialization fails with a `SqliteException` or `IOException`. It is the app's long-standing corruption recovery and it takes the durable tables with it. There is no backup or export. Note that `playlists` and `playlist_items` are labelled durable but their own drift handlers still drop and recreate them; only `folder_metadata` migrates today.
+- *Eviction*: rows are keyed on absolute path, so a folder that is deleted, renamed or moved would otherwise leave its row and artwork file behind forever. `IArtworkService.PruneOrphanedArtworkAsync`, called after a video library cache write, deletes rows and artwork files for folders that have vanished from beneath a library root that is currently readable. Paths outside every scanned root, and paths under an offline drive or network share, are kept on purpose: there they cannot be told apart from data that is merely unplugged.
 
 ## 🏛️ Architecture Rules
 

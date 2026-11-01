@@ -1,4 +1,5 @@
 using Screenbox.Core.Enums;
+using Screenbox.Core.Helpers;
 using Windows.Media;
 
 namespace Screenbox.Core.Services;
@@ -148,4 +149,34 @@ public interface ISettingsService
     /// Gets or sets the preferred sort order for the albums page.
     /// </summary>
     AlbumSortOrder PersistentAlbumsSortOrder { get; set; }
+
+    /// <summary>
+    /// Gets or sets the fraction of a media item's duration that must be played back
+    /// for the item to be marked as watched.
+    /// </summary>
+    /// <value>A value between 0 and 1. The default is <see cref="WatchThreshold.DefaultPercent"/>.</value>
+    double WatchedThresholdPercent { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether online metadata scraping (AniList, Jikan, TMDB) is enabled. This is the
+    /// master opt-in toggle for the whole feature: off by default, and while it is off no provider
+    /// is even constructed, let alone called, for any folder.
+    /// </summary>
+    bool MetadataEnabled { get; set; }
+
+    /// <summary>Gets or sets whether the AniList provider is used for online metadata scraping.</summary>
+    bool MetadataUseAniList { get; set; }
+
+    /// <summary>Gets or sets whether the Jikan (MyAnimeList) provider is used for online metadata scraping.</summary>
+    bool MetadataUseJikan { get; set; }
+
+    /// <summary>Gets or sets whether the TMDB provider is used for online metadata scraping.</summary>
+    bool MetadataUseTmdb { get; set; }
+
+    /// <summary>
+    /// Gets or sets the user's own TMDB API key, required for the TMDB provider. Stored in UWP
+    /// <c>LocalSettings</c>, which is not encrypted - never logged and never included in an
+    /// exception message.
+    /// </summary>
+    string TmdbApiKey { get; set; }
 }

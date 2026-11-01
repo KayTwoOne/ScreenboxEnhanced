@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Data.Sqlite;
@@ -63,8 +64,12 @@ public sealed partial class DatabaseService
             "artist", "album", "album_artist", "composers", "genre", "track_number", "bitrate",
             "subtitle", "producers", "writers", "width", "height", "video_bitrate");
         EnsureReplaceableTable(connection, "playback_progress", CreatePlaybackProgressSql, "location", "position_ticks");
+        EnsureReplaceableTable(connection, "folder_scrape_cache", CreateFolderScrapeCacheSql,
+            "path", "provider", "provider_id", "synopsis", "year", "scraped_poster", "last_scraped");
         EnsurePlaylistsTable(connection);
         EnsurePlaylistItemsTable(connection);
+        EnsureFolderMetadataTable(connection);
+        EnsureWatchStateTable(connection);
         migrationComplete = await TryImportLegacyPlaylistsAsync(connection);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
@@ -75,6 +80,13 @@ public sealed partial class DatabaseService
         }
     }
 
+    /// <summary>
+    /// Last-resort recovery for a database file that cannot be opened or migrated at all. This
+    /// deletes the file, which destroys durable user-authored data in <c>folder_metadata</c> and
+    /// <c>playlists</c> along with the rebuildable cache tables. Per-table migration
+    /// (see <see cref="EnsureFolderMetadataTable"/>) is what keeps that data safe from routine
+    /// schema changes; nothing protects it from genuine file corruption.
+    /// </summary>
     private void RecreateDatabaseFile(string dbPath, string connectionString)
     {
         _connectionString = null;
@@ -90,8 +102,11 @@ public sealed partial class DatabaseService
         ExecuteNonQuery(connection, CreateLibraryFoldersSql);
         ExecuteNonQuery(connection, CreateMediaRecordsSql);
         ExecuteNonQuery(connection, CreatePlaybackProgressSql);
+        ExecuteNonQuery(connection, CreateFolderScrapeCacheSql);
         ExecuteNonQuery(connection, CreatePlaylistsSql);
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
+        ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
+        ExecuteNonQuery(connection, CreateWatchStateSql);
         transaction.Commit();
         ExecuteNonQuery(connection, "PRAGMA foreign_keys=ON;");
     }
@@ -148,6 +163,160 @@ public sealed partial class DatabaseService
 
         ExecuteNonQuery(connection, "DROP TABLE playlist_items;");
         ExecuteNonQuery(connection, CreatePlaylistItemsSql);
+    }
+
+    // `folder_metadata` holds durable, user-authored data: custom folder titles and manual poster
+    // choices that nothing else in the app can reconstruct. It is therefore the one table here that
+    // is NEVER dropped on column drift. Missing columns are added with ALTER TABLE, and a shape that
+    // cannot be reached additively is rebuilt by copying the existing rows into the new table.
+    // Registering it with EnsureReplaceableTable - or copying the drop-and-recreate shape of
+    // EnsurePlaylistsTable and EnsurePlaylistItemsTable, which do destroy their rows on drift -
+    // would wipe every custom title and poster choice the first time a column is added.
+    private static void EnsureFolderMetadataTable(SqliteConnection connection)
+    {
+        HashSet<string> actualColumns = ReadTableColumns(connection, FolderMetadataTableName);
+        if (actualColumns.Count is 0)
+        {
+            ExecuteNonQuery(connection, BuildCreateTableSql(FolderMetadataTableName, FolderMetadataColumns));
+            return;
+        }
+
+        string[] expectedColumns = FolderMetadataColumns.Select(column => column.Name).ToArray();
+        if (!HasSchemaDrift(actualColumns, expectedColumns))
+        {
+            return;
+        }
+
+        // Columns the stored database has never heard of can simply be appended in place, which
+        // leaves every existing row untouched. SQLite cannot ADD COLUMN for a PRIMARY KEY or UNIQUE
+        // column, and it cannot remove a column this way, so those cases fall through to the rebuild.
+        var expectedNames = new HashSet<string>(expectedColumns, StringComparer.OrdinalIgnoreCase);
+        bool hasUnknownColumns = actualColumns.Any(column => !expectedNames.Contains(column));
+        (string Name, string Definition)[] missingColumns =
+            FolderMetadataColumns.Where(column => !actualColumns.Contains(column.Name)).ToArray();
+
+        if (!hasUnknownColumns && missingColumns.All(column => CanAddColumnInPlace(column.Definition)))
+        {
+            foreach ((string name, string definition) in missingColumns)
+            {
+                ExecuteNonQuery(connection, $"ALTER TABLE {FolderMetadataTableName} ADD COLUMN {name} {definition};");
+            }
+
+            return;
+        }
+
+        RebuildFolderMetadataTable(connection, actualColumns);
+    }
+
+    /// <summary>
+    /// Copies every stored row into a table with the current shape, for drift that
+    /// <c>ALTER TABLE ... ADD COLUMN</c> cannot express (a removed or retyped column). Columns that
+    /// exist in both shapes carry their values across; anything else falls back to its default.
+    /// </summary>
+    private static void RebuildFolderMetadataTable(SqliteConnection connection, HashSet<string> actualColumns)
+    {
+        const string stagingTableName = "folder_metadata_migrating";
+        ExecuteNonQuery(connection, $"DROP TABLE IF EXISTS {stagingTableName};");
+        ExecuteNonQuery(connection, BuildCreateTableSql(stagingTableName, FolderMetadataColumns));
+
+        string[] sharedColumns = FolderMetadataColumns
+            .Where(column => actualColumns.Contains(column.Name))
+            .Select(column => column.Name)
+            .ToArray();
+
+        if (sharedColumns.Length > 0)
+        {
+            string columnList = string.Join(", ", sharedColumns);
+            ExecuteNonQuery(connection,
+                $"INSERT OR REPLACE INTO {stagingTableName} ({columnList}) SELECT {columnList} FROM {FolderMetadataTableName};");
+        }
+
+        ExecuteNonQuery(connection, $"DROP TABLE {FolderMetadataTableName};");
+        ExecuteNonQuery(connection, $"ALTER TABLE {stagingTableName} RENAME TO {FolderMetadataTableName};");
+    }
+
+    // `watch_state` holds durable, unbounded watched-history data: whether each media item has been
+    // watched to completion. Unlike `playback_progress` (a capped 64-entry LRU that is rebuilt by
+    // deleting and reinserting the whole table), watch_state must never be dropped on column drift,
+    // or a user's entire watch history would be silently lost the first time a column is added.
+    // Missing columns are added with ALTER TABLE, and a shape that cannot be reached additively is
+    // rebuilt by copying the existing rows into the new table, exactly like EnsureFolderMetadataTable.
+    private static void EnsureWatchStateTable(SqliteConnection connection)
+    {
+        HashSet<string> actualColumns = ReadTableColumns(connection, WatchStateTableName);
+        if (actualColumns.Count is 0)
+        {
+            ExecuteNonQuery(connection, BuildCreateTableSql(WatchStateTableName, WatchStateColumns));
+            return;
+        }
+
+        string[] expectedColumns = WatchStateColumns.Select(column => column.Name).ToArray();
+        if (!HasSchemaDrift(actualColumns, expectedColumns))
+        {
+            return;
+        }
+
+        var expectedNames = new HashSet<string>(expectedColumns, StringComparer.OrdinalIgnoreCase);
+        bool hasUnknownColumns = actualColumns.Any(column => !expectedNames.Contains(column));
+        (string Name, string Definition)[] missingColumns =
+            WatchStateColumns.Where(column => !actualColumns.Contains(column.Name)).ToArray();
+
+        if (!hasUnknownColumns && missingColumns.All(column => CanAddColumnInPlace(column.Definition)))
+        {
+            foreach ((string name, string definition) in missingColumns)
+            {
+                ExecuteNonQuery(connection, $"ALTER TABLE {WatchStateTableName} ADD COLUMN {name} {definition};");
+            }
+
+            return;
+        }
+
+        RebuildWatchStateTable(connection, actualColumns);
+    }
+
+    /// <summary>
+    /// Copies every stored row into a table with the current shape, for drift that
+    /// <c>ALTER TABLE ... ADD COLUMN</c> cannot express (a removed or retyped column). Columns that
+    /// exist in both shapes carry their values across; anything else falls back to its default.
+    /// </summary>
+    private static void RebuildWatchStateTable(SqliteConnection connection, HashSet<string> actualColumns)
+    {
+        const string stagingTableName = "watch_state_migrating";
+        ExecuteNonQuery(connection, $"DROP TABLE IF EXISTS {stagingTableName};");
+        ExecuteNonQuery(connection, BuildCreateTableSql(stagingTableName, WatchStateColumns));
+
+        string[] sharedColumns = WatchStateColumns
+            .Where(column => actualColumns.Contains(column.Name))
+            .Select(column => column.Name)
+            .ToArray();
+
+        if (sharedColumns.Length > 0)
+        {
+            string columnList = string.Join(", ", sharedColumns);
+            ExecuteNonQuery(connection,
+                $"INSERT OR REPLACE INTO {stagingTableName} ({columnList}) SELECT {columnList} FROM {WatchStateTableName};");
+        }
+
+        ExecuteNonQuery(connection, $"DROP TABLE {WatchStateTableName};");
+        ExecuteNonQuery(connection, $"ALTER TABLE {stagingTableName} RENAME TO {WatchStateTableName};");
+    }
+
+    /// <summary>
+    /// True when SQLite accepts the column definition in an <c>ALTER TABLE ... ADD COLUMN</c>
+    /// statement. Key and unique constraints, and NOT NULL without a default, must be rebuilt.
+    /// </summary>
+    private static bool CanAddColumnInPlace(string definition)
+    {
+        if (definition.Contains("PRIMARY KEY", StringComparison.OrdinalIgnoreCase)) return false;
+        if (definition.Contains("UNIQUE", StringComparison.OrdinalIgnoreCase)) return false;
+        return !definition.Contains("NOT NULL", StringComparison.OrdinalIgnoreCase)
+               || definition.Contains("DEFAULT", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildCreateTableSql(string tableName, (string Name, string Definition)[] columns)
+    {
+        string body = string.Join(",\n    ", columns.Select(column => $"{column.Name} {column.Definition}"));
+        return $"CREATE TABLE IF NOT EXISTS {tableName} (\n    {body}\n);";
     }
 
     private async Task<bool> TryImportLegacyPlaylistsAsync(SqliteConnection connection)
@@ -367,6 +536,22 @@ public sealed partial class DatabaseService
         );
         """;
 
+    private const string CreateFolderScrapeCacheSql = """
+        CREATE TABLE IF NOT EXISTS folder_scrape_cache (
+            -- Windows paths are not case-sensitive, but SQLite's default BINARY collation is, so
+            -- lookups need an explicit case-insensitive collation. COLLATE NOCASE only folds ASCII
+            -- casing, which is the right trade-off for filesystem paths (and keeps the stored path
+            -- in its original casing, unlike upper-invariant normalization in C#).
+            path           TEXT    PRIMARY KEY COLLATE NOCASE,
+            provider       TEXT,
+            provider_id    TEXT,
+            synopsis       TEXT,
+            year           INTEGER,
+            scraped_poster TEXT,
+            last_scraped   INTEGER
+        );
+        """;
+
     private const string CreatePlaylistsSql = """
         CREATE TABLE IF NOT EXISTS playlists (
             id           TEXT PRIMARY KEY,
@@ -383,4 +568,49 @@ public sealed partial class DatabaseService
             sort_order  INTEGER NOT NULL
         );
         """;
+
+    private const string FolderMetadataTableName = "folder_metadata";
+
+    /// <summary>
+    /// The single source of truth for the <c>folder_metadata</c> shape. The same definitions build
+    /// the CREATE TABLE statement for a new database and the ALTER TABLE statement that adds a
+    /// column to an existing one, so a column added here migrates without dropping any user data.
+    /// </summary>
+    private static readonly (string Name, string Definition)[] FolderMetadataColumns =
+    [
+        ("path", "TEXT PRIMARY KEY"),
+        ("custom_title", "TEXT"),
+        ("poster_file", "TEXT"),
+        ("poster_source", "INTEGER NOT NULL DEFAULT 0"),
+        ("provider_pin", "TEXT"),
+        ("sort_order", "INTEGER")
+    ];
+
+    private const string WatchStateTableName = "watch_state";
+
+    private const string CreateWatchStateSql = """
+        CREATE TABLE IF NOT EXISTS watch_state (
+            location            TEXT PRIMARY KEY,
+            completed           INTEGER NOT NULL DEFAULT 0,
+            last_played         INTEGER,
+            duration_ticks      INTEGER,
+            last_position_ticks INTEGER NOT NULL DEFAULT 0,
+            original_location   TEXT
+        );
+        """;
+
+    /// <summary>
+    /// The single source of truth for the <c>watch_state</c> shape. The same definitions build
+    /// the CREATE TABLE statement for a new database and the ALTER TABLE statement that adds a
+    /// column to an existing one, so a column added here migrates without dropping watch history.
+    /// </summary>
+    private static readonly (string Name, string Definition)[] WatchStateColumns =
+    [
+        ("location", "TEXT PRIMARY KEY"),
+        ("completed", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_played", "INTEGER"),
+        ("duration_ticks", "INTEGER"),
+        ("last_position_ticks", "INTEGER NOT NULL DEFAULT 0"),
+        ("original_location", "TEXT")
+    ];
 }

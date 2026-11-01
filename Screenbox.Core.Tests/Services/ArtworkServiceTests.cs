@@ -1,0 +1,428 @@
+using Microsoft.Extensions.Logging.Abstractions;
+using Screenbox.Core.Coordinators;
+using Screenbox.Core.Enums;
+using Screenbox.Core.Models;
+using Screenbox.Core.Services;
+using Screenbox.Core.Tests.Helpers;
+using Windows.Storage;
+
+namespace Screenbox.Core.Tests.Services;
+
+public sealed class ArtworkServiceTests
+{
+    private static async Task<DatabaseService> CreateDatabaseAsync(string dir)
+    {
+        var db = new DatabaseService(NullLogger<DatabaseService>.Instance) { DbFolderPath = dir };
+        await db.InitializeAsync();
+        return db;
+    }
+
+    [Test]
+    public async Task MaxRecursionDepth_IsAtLeastThreeToCoverNestedSeasonFolders()
+    {
+        // Real libraries nest as Series/Season/Extras, so anything below 3 would
+        // fail to find a video for the series-level folder that most needs artwork.
+        await Assert.That(ArtworkService.MaxRecursionDepth).IsGreaterThanOrEqualTo(3);
+    }
+
+    [Test]
+    public async Task ArtworkFolderName_IsStableAndRelative()
+    {
+        await Assert.That(ArtworkService.ArtworkFolderName).IsEqualTo("Artwork");
+    }
+
+    [Test]
+    public async Task IsConventionFileName_MatchesKnownConventionsCaseInsensitively()
+    {
+        await Assert.That(ArtworkService.IsConventionFileName("poster.jpg")).IsTrue();
+        await Assert.That(ArtworkService.IsConventionFileName("Folder.JPG")).IsTrue();
+        await Assert.That(ArtworkService.IsConventionFileName("poster.png")).IsTrue();
+        await Assert.That(ArtworkService.IsConventionFileName("cover.jpg")).IsTrue();
+        await Assert.That(ArtworkService.IsConventionFileName("episode01.jpg")).IsFalse();
+        await Assert.That(ArtworkService.IsConventionFileName("poster.txt")).IsFalse();
+    }
+
+    [Test]
+    public async Task ShouldSkipConventionCopy_SkipsOnlyWhenDestinationExistsAndMetadataAlreadyRecordsIt()
+    {
+        const string conventionExtension = ".jpg";
+        FolderMetadataDto recorded = new()
+        {
+            Path = "C:\\Library\\Show",
+            PosterSource = PosterSource.Convention,
+            PosterFile = "g_deadbeef_8f2c1a.jpg"
+        };
+
+        // Already copied and recorded: skip the redundant copy and database write. This is the
+        // hot path exercised on every folder navigation once a convention poster is established.
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, conventionExtension, recordedFileExists: true))
+            .IsTrue();
+
+        // Metadata claims the file exists but it is missing from local storage: must (re)copy.
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(recorded, conventionExtension, recordedFileExists: false))
+            .IsFalse();
+
+        // No metadata at all: first time seeing this folder, must copy.
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(null, conventionExtension, recordedFileExists: true))
+            .IsFalse();
+
+        // Metadata records a different source (e.g. an AutoFrame fallback happens to reuse the
+        // same file name): must not mistake that for a recorded convention copy.
+        FolderMetadataDto differentSource = new()
+        {
+            Path = recorded.Path,
+            PosterSource = PosterSource.AutoFrame,
+            PosterFile = recorded.PosterFile
+        };
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(differentSource, conventionExtension, recordedFileExists: true))
+            .IsFalse();
+
+        // The convention file's extension changed from .png to .jpg: must copy the new one rather
+        // than keeping the stale reference.
+        FolderMetadataDto staleFileName = new()
+        {
+            Path = recorded.Path,
+            PosterSource = PosterSource.Convention,
+            PosterFile = "g_00000000_4b1e.png"
+        };
+        await Assert.That(ArtworkService.ShouldSkipConventionCopy(staleFileName, conventionExtension, recordedFileExists: true))
+            .IsFalse();
+    }
+
+    [Test]
+    public async Task IsOrphanedFolderPath_EvictsOnlyFoldersThatGenuinelyDisappeared()
+    {
+        string[] roots = [@"D:\Media\Anime", @"E:\Archive"];
+        // E: is an unplugged drive: its root reads as missing, and so does everything beneath it.
+        HashSet<string> existing = new(StringComparer.OrdinalIgnoreCase)
+        {
+            @"D:\Media\Anime",
+            @"D:\Media\Anime\Frieren"
+        };
+        bool DirectoryExists(string path) => existing.Contains(path);
+
+        // Gone from a library root that is readable right now: safe to evict.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\Anime\Deleted Show", roots, DirectoryExists))
+            .IsTrue();
+
+        // Still on disk: keep the row, including a manual poster.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\Anime\Frieren", roots, DirectoryExists))
+            .IsFalse();
+
+        // Under a root that is itself unreachable (offline drive or network share): everything
+        // there looks missing, so evicting would destroy data that is merely not plugged in.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"E:\Archive\Old Show", roots, DirectoryExists))
+            .IsFalse();
+
+        // Outside every scanned root: this scan says nothing about it, so leave it alone.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"C:\Elsewhere\Show", roots, DirectoryExists))
+            .IsFalse();
+
+        // A sibling whose name merely starts with a root's name is not inside that root.
+        await Assert.That(ArtworkService.IsOrphanedFolderPath(@"D:\Media\AnimeMovies\Show", roots, DirectoryExists))
+            .IsFalse();
+    }
+
+    // ------------------------------------------------------------------
+    // Task 6's non-negotiable: a scraped poster must never be able to overwrite a manual one.
+    // TryWriteScrapedPosterRowAsync is the guard+write step isolated from SetScrapedPosterAsync's
+    // network/file-system work, so it can be exercised against a real database alone - assertions
+    // are made on the persisted row, never on ArtworkResolver or any other reader.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ManualPosterAlreadySet_NeverOverwritesIt()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+
+        // The user has already chosen a poster manually before any scrape runs.
+        await db.SetFolderPosterAsync(path, "manual-poster.jpg", PosterSource.Manual);
+
+        // A scrape that genuinely finds a match with a poster URL - Task 5's real coordinator, run
+        // against this same database, exactly as the settings page's scan command would drive it.
+        // A FakeArtworkService here keeps this call network-free; the real ArtworkService guard is
+        // what this test exercises directly below, via TryWriteScrapedPosterRowAsync.
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("1", "Dan Da Dan", "synopsis", 2024, "https://example.com/scraped-poster.jpg")]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db, new FakeArtworkService(),
+            NullLogger<MetadataScrapeCoordinator>.Instance);
+
+        MetadataMatch? match = await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
+        await Assert.That(match).IsNotNull();
+        await Assert.That(match!.PosterUrl).IsNotNull()
+            .Because("The guard this test exercises only matters when a scrape genuinely found a poster to (almost) act on.");
+
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+
+        // Stands in for SetScrapedPosterAsync's own write step once a download has completed - the
+        // guard under test here is isolated from the network/file-system work around it.
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, "g_scraped_poster.jpg");
+
+        await Assert.That(written).IsFalse();
+
+        // The assertion that matters: read the persisted row back from the database, not from
+        // ArtworkResolver or any other reader - a resolver's read-time precedence cannot protect
+        // data that a writer already clobbered.
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted).IsNotNull();
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.Manual);
+        await Assert.That(persisted.PosterFile).IsEqualTo("manual-poster.jpg");
+    }
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_NoExistingPoster_WritesTheScrapedPosterRow()
+    {
+        // The positive case matters just as much as the negative one: without it, a guard that
+        // always returns false (whatever the row holds) would still pass the test above for the
+        // wrong reason.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren";
+
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, "g_scraped_poster.jpg");
+
+        await Assert.That(written).IsTrue();
+
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted).IsNotNull();
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.Scraped);
+        await Assert.That(persisted.PosterFile).IsEqualTo("g_scraped_poster.jpg");
+    }
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ExistingAutoFramePoster_IsReplacedByTheScrapedOne()
+    {
+        // Manual is the only source a scrape must never displace - AutoFrame (and Convention) sit
+        // below Scraped in ArtworkResolver's priority order and must lose here too, or the write
+        // side and the read side would disagree about who wins.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren";
+        await db.SetFolderPosterAsync(path, "g_auto_frame.jpg", PosterSource.AutoFrame);
+
+        // A superseded poster now triggers a real delete attempt (Finding 2), which needs a real
+        // artwork folder to resolve - ApplicationData.Current needs package identity this test
+        // host does not have, so ArtworkFolderPath is redirected to a throwaway temp directory
+        // instead (see ArtworkService.ArtworkFolderPath's own doc comment).
+        using var artworkFixture = new TestDirectoryFixture();
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, "g_scraped_poster.jpg");
+
+        await Assert.That(written).IsTrue();
+
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.Scraped);
+        await Assert.That(persisted.PosterFile).IsEqualTo("g_scraped_poster.jpg");
+    }
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ExistingAutoFramePoster_DeletesTheSupersededFile()
+    {
+        // Finding 2: every OTHER poster writer in this file (see RecordPosterAsync) captures the
+        // file name a write supersedes and deletes it via TryDeleteArtworkFileAsync.
+        // TryWriteScrapedPosterRowAsync used to discard that return value, so an AutoFrame or
+        // Convention poster superseded by a scraped one was never deleted - orphaned on disk
+        // forever. ExistingAutoFramePoster_IsReplacedByTheScrapedOne above only proves the ROW
+        // changed; this proves the superseded FILE is actually gone.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren - Orphan Check";
+        const string oldFileName = "g_orphan_check_old.jpg";
+        const string newFileName = "g_orphan_check_new.jpg";
+        await db.SetFolderPosterAsync(path, oldFileName, PosterSource.AutoFrame);
+
+        // A real (throwaway, auto-cleaned-up) directory stands in for the local Artwork folder:
+        // ApplicationData.Current needs package identity this test host does not have, but
+        // StorageFolder.GetFolderFromPathAsync works against any real path without it.
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(oldFileName, CreationCollisionOption.ReplaceExisting);
+
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, newFileName);
+
+        await Assert.That(written).IsTrue();
+        await Assert.That(await artworkFolder.TryGetItemAsync(oldFileName)).IsNull()
+            .Because("The AutoFrame poster this scrape superseded must be deleted, not left orphaned on disk.");
+    }
+
+    [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ExistingScrapedPoster_IsReplacedAndItsFileDeleted()
+    {
+        // What an explicit rescan does to a poster it scraped before: the new download replaces the
+        // old one, and the old image does not linger on disk beside it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        const string oldFileName = "g_first_scrape.jpg";
+        const string newFileName = "g_second_scrape.jpg";
+        await db.SetFolderPosterAsync(path, oldFileName, PosterSource.Scraped);
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(oldFileName, CreationCollisionOption.ReplaceExisting);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, newFileName);
+
+        await Assert.That(written).IsTrue();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterFile).IsEqualTo(newFileName);
+        await Assert.That(persisted.PosterSource).IsEqualTo(PosterSource.Scraped);
+        await Assert.That(await artworkFolder.TryGetItemAsync(oldFileName)).IsNull()
+            .Because("The scraped poster this rescan replaced must be deleted, not left orphaned on disk.");
+    }
+
+    [Test]
+    public async Task SetScrapedPosterAsync_EmptyPosterUrl_ReturnsFalseWithoutTouchingTheDatabase()
+    {
+        // The public entry point's own cheap input guard, ahead of anything else it would need to
+        // do (including the ApplicationData-backed artwork folder, which this test host cannot
+        // provide) - so this is exercisable and must never crash on a null/blank URL.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+
+        bool written = await artworkService.SetScrapedPosterAsync(@"D:\Anime\Dan Da Dan", string.Empty, CancellationToken.None);
+
+        await Assert.That(written).IsFalse();
+    }
+
+    [Test]
+    public async Task SetScrapedPosterAsync_PlainHttpUrl_IsRejectedBeforeAnyClientExists()
+    {
+        // Every supported provider serves artwork over HTTPS, so plain HTTP is refused outright.
+        // Asserting only the false return would not prove that: an accepted HTTP URL also returns
+        // false once its download fails. The client-creation probe is what discriminates. The URL
+        // is a refused local port, so even a regression sends nothing off the machine.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+
+        bool written = await artworkService.SetScrapedPosterAsync(
+            @"D:\Anime\Dan Da Dan", "http://127.0.0.1:9/poster.jpg", CancellationToken.None);
+
+        await Assert.That(written).IsFalse();
+        await Assert.That(artworkService.HasCreatedHttpClient).IsFalse();
+    }
+    // ------------------------------------------------------------------
+    // RemoveManualPosterAsync: how a folder gets back to automatic, convention and online artwork.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task RemoveManualPosterAsync_ManualPoster_ClearsTheRowKeepsTheTitleAndDeletesTheFile()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        const string fileName = "m_remove_manual.jpg";
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderCustomTitleAsync(path, "Dandadan");
+        await db.SetFolderPosterAsync(path, fileName, PosterSource.Manual);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool removed = await artworkService.RemoveManualPosterAsync(path);
+
+        await Assert.That(removed).IsTrue();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.None);
+        await Assert.That(persisted.PosterFile).IsNull();
+        await Assert.That(persisted.CustomTitle).IsEqualTo("Dandadan");
+        await Assert.That(await artworkFolder.TryGetItemAsync(fileName)).IsNull()
+            .Because("The removed image must not be left behind on disk.");
+    }
+
+    [Test]
+    public async Task RemoveManualPosterAsync_PosterThatIsNotManual_ChangesNothingAndDeletesNothing()
+    {
+        // The file belongs to a poster the user did not choose. If the delete ran regardless of what
+        // the database operation decided, an automatic poster's image would vanish from under a row
+        // that still points at it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Frieren";
+        const string fileName = "g_remove_auto.jpg";
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderPosterAsync(path, fileName, PosterSource.AutoFrame);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool removed = await artworkService.RemoveManualPosterAsync(path);
+
+        await Assert.That(removed).IsFalse();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterSource).IsEqualTo(PosterSource.AutoFrame);
+        await Assert.That(persisted.PosterFile).IsEqualTo(fileName);
+        await Assert.That(await artworkFolder.TryGetItemAsync(fileName)).IsNotNull();
+    }
+
+    [Test]
+    public async Task RemoveManualPosterAsync_FolderOnceSearchedWithoutFindingArtwork_ResolvesAgain()
+    {
+        // A folder searched without finding anything is remembered for the session so scrolling back
+        // does not walk it again. Removing a poster must lift that, or the folder could stay blank
+        // after the removal even though artwork is now available for it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        using var artworkFixture = new TestDirectoryFixture();
+        using var libraryFixture = new TestDirectoryFixture();
+        StorageFolder folder = await StorageFolder.GetFolderFromPathAsync(libraryFixture.DirectoryPath);
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        // Nothing to show yet: the folder holds no video and no poster image, and is remembered as such.
+        await Assert.That(await artworkService.GetPosterFileNameAsync(folder, null)).IsNull();
+
+        // A manual poster is then set without going through the service (so the memory is not
+        // cleared by it), and a convention poster appears in the folder.
+        const string manualFile = "m_resolve_again.jpg";
+        await artworkFolder.CreateFileAsync(manualFile, CreationCollisionOption.ReplaceExisting);
+        await db.SetFolderPosterAsync(folder.Path, manualFile, PosterSource.Manual);
+        await File.WriteAllBytesAsync(Path.Combine(libraryFixture.DirectoryPath, "poster.jpg"), [1, 2, 3]);
+
+        await artworkService.RemoveManualPosterAsync(folder.Path);
+
+        FolderMetadataDto? afterRemoval = await db.LoadFolderMetadataAsync(folder.Path);
+        await Assert.That(afterRemoval!.PosterSource).IsEqualTo(PosterSource.None)
+            .Because("The manual poster is gone, so nothing pins the folder to it any more.");
+
+        string? resolved = await artworkService.GetPosterFileNameAsync(folder, afterRemoval);
+
+        await Assert.That(resolved).IsNotNull()
+            .Because("With the folder forgotten, the poster.jpg now sitting in it is found.");
+        await Assert.That(resolved).IsNotEqualTo(manualFile);
+        FolderMetadataDto? afterResolve = await db.LoadFolderMetadataAsync(folder.Path);
+        await Assert.That(afterResolve!.PosterSource).IsEqualTo(PosterSource.Convention);
+    }
+}

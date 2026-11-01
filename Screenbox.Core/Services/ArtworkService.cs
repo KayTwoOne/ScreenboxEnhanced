@@ -1,0 +1,631 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Screenbox.Core.Enums;
+using Screenbox.Core.Helpers;
+using Screenbox.Core.Models;
+using Windows.Graphics.Imaging;
+using Windows.Storage;
+using Windows.Storage.FileProperties;
+using Windows.Storage.Streams;
+
+// Exposes TryWriteScrapedPosterRowAsync so the manual-poster guard can be verified against a real
+// database, isolated from the network/file-system steps SetScrapedPosterAsync also performs. Not
+// part of the public IArtworkService contract.
+[assembly: InternalsVisibleTo("Screenbox.Core.Tests")]
+
+namespace Screenbox.Core.Services;
+
+/// <inheritdoc cref="IArtworkService"/>
+public sealed partial class ArtworkService : IArtworkService, IDisposable
+{
+    /// <summary>Folder name inside local storage where artwork is cached.</summary>
+    public const string ArtworkFolderName = "Artwork";
+
+    /// <summary>
+    /// How deep to search for a video when generating a poster. Series folders commonly
+    /// nest as Series/Season/Extras, so three levels is the practical minimum.
+    /// </summary>
+    public const int MaxRecursionDepth = 3;
+
+    private static readonly string[] ConventionStems = ["poster", "folder", "cover"];
+    private static readonly string[] ConventionExtensions = [".jpg", ".jpeg", ".png"];
+
+    private readonly IDatabaseService _databaseService;
+    private readonly ILogger<ArtworkService> _logger;
+
+    /// <summary>
+    /// Folders already searched, without success, for anything to show. Resolving artwork runs on
+    /// every container realization, so without this a folder holding no video is walked three
+    /// levels deep on every scroll-back. Entries live for the session and are dropped when the
+    /// folder gains a manual poster or when the library is rescanned.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _foldersWithoutArtwork = new(StringComparer.OrdinalIgnoreCase);
+
+    private static long _artworkSequence;
+
+    private static readonly TimeSpan PosterDownloadTimeout = TimeSpan.FromSeconds(15);
+
+    // Lazily created on first scraped-poster download, exactly like IMetadataProviderFactory's own
+    // HttpClient: nothing network-capable exists until the user has opted in AND explicitly run a
+    // scan, never merely because ArtworkService (an always-registered singleton) was constructed.
+    private readonly object _httpClientLock = new();
+    private HttpClient? _httpClient;
+
+    // Null in production, where the client is built over its own default handler. Tests hand in a
+    // handler that answers from memory, so nothing they exercise can reach the network.
+    private readonly HttpMessageHandler? _httpMessageHandler;
+
+    public ArtworkService(IDatabaseService databaseService, ILogger<ArtworkService> logger)
+        : this(databaseService, logger, httpMessageHandler: null)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: builds the service over a caller-supplied <see cref="HttpMessageHandler"/>.
+    /// Internal on purpose, so dependency injection - which only considers public constructors -
+    /// keeps constructing the service the way it always has. The handler is not disposed here.
+    /// </summary>
+    internal ArtworkService(
+        IDatabaseService databaseService, ILogger<ArtworkService> logger, HttpMessageHandler? httpMessageHandler)
+    {
+        _databaseService = databaseService;
+        _logger = logger;
+        _httpMessageHandler = httpMessageHandler;
+    }
+
+    /// <summary>
+    /// Overrides where the local Artwork folder resolves to. Empty by default, which means the
+    /// production path: a subfolder of <see cref="ApplicationData.Current"/>'s local folder. Unlike
+    /// that API, <see cref="StorageFolder.GetFolderFromPathAsync"/> needs no package identity, so
+    /// tests set this to a real temporary directory instead - mirroring
+    /// <see cref="DatabaseService.DbFolderPath"/>'s own pattern for redirecting storage in tests.
+    /// </summary>
+    public string ArtworkFolderPath { get; set; } = string.Empty;
+
+    /// <summary>Returns true when the file name is a recognised poster convention.</summary>
+    public static bool IsConventionFileName(string fileName)
+    {
+        string stem = System.IO.Path.GetFileNameWithoutExtension(fileName);
+        string ext = System.IO.Path.GetExtension(fileName);
+        return ConventionStems.Contains(stem, StringComparer.OrdinalIgnoreCase)
+            && ConventionExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// True when a convention-file poster has already been copied into local storage and
+    /// recorded for this folder, so re-copying and re-writing metadata would be redundant.
+    /// <see cref="GetPosterFileNameAsync"/> is called once per item on every folder navigation,
+    /// so this check keeps that hot path free of unnecessary file and database I/O.
+    /// </summary>
+    /// <param name="metadata">Stored metadata for the folder, or null when it has none.</param>
+    /// <param name="conventionExtension">Extension of the convention file found inside the folder.</param>
+    /// <param name="recordedFileExists">Whether the recorded poster file is present in local storage.</param>
+    public static bool ShouldSkipConventionCopy(FolderMetadataDto? metadata, string conventionExtension, bool recordedFileExists)
+    {
+        // Stored file names carry a write discriminator (see BuildFileName), so the recorded name
+        // cannot be recomputed from the folder path. The extension is what distinguishes a
+        // convention file that has been swapped for a different image format.
+        return recordedFileExists
+            && metadata is { PosterSource: PosterSource.Convention, PosterFile: { Length: > 0 } existingFileName }
+            && string.Equals(
+                System.IO.Path.GetExtension(existingFileName), conventionExtension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// True when a stored folder path has genuinely disappeared: it sits beneath a library root
+    /// that is currently readable, yet the folder itself is gone. Restricting eviction to paths
+    /// under a live root keeps a disconnected drive or an offline network share - where every path
+    /// looks missing - from destroying the user's titles and manual poster choices.
+    /// </summary>
+    /// <param name="folderPath">Absolute folder path stored in the metadata row.</param>
+    /// <param name="libraryFolderPaths">Absolute paths of the library roots just enumerated.</param>
+    /// <param name="directoryExists">Existence probe, injected so the rule can be tested without a filesystem.</param>
+    public static bool IsOrphanedFolderPath(
+        string folderPath, IReadOnlyList<string> libraryFolderPaths, Func<string, bool> directoryExists)
+    {
+        if (string.IsNullOrEmpty(folderPath)) return false;
+
+        foreach (string root in libraryFolderPaths)
+        {
+            if (string.IsNullOrEmpty(root) || !IsUnderRoot(folderPath, root)) continue;
+            if (!directoryExists(root)) continue;
+            return !directoryExists(folderPath);
+        }
+
+        return false;
+    }
+
+    private static bool IsUnderRoot(string folderPath, string root)
+    {
+        string trimmedRoot = root.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        string trimmedPath = folderPath.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        if (string.Equals(trimmedPath, trimmedRoot, StringComparison.OrdinalIgnoreCase)) return true;
+        return trimmedPath.StartsWith(trimmedRoot + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <inheritdoc/>
+    public async Task<string?> GetPosterFileNameAsync(StorageFolder folder, FolderMetadataDto? metadata)
+    {
+        try
+        {
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            bool recordedFileExists = metadata?.PosterFile is { Length: > 0 } recordedName
+                && await artworkFolder.TryGetItemAsync(recordedName) is not null;
+
+            // A manual or scraped choice is settled by the row alone: no scan of the folder is
+            // needed, which is what makes repeated realization of an established folder cheap.
+            if (ArtworkResolver.ResolveFromMetadata(metadata) is { } pinned)
+            {
+                // The row is deliberately left intact so the user's choice is never forgotten, but
+                // a file that is gone cannot be drawn. Returning null here is what lets the view
+                // fall back to the folder glyph instead of rendering an empty tile.
+                if (recordedFileExists) return pinned.FileName;
+                _logger.LogWarning(
+                    "Poster file '{FileName}' for '{Path}' is missing; falling back to the folder glyph.",
+                    metadata?.PosterFile, folder.Path);
+                return null;
+            }
+
+            if (_foldersWithoutArtwork.ContainsKey(folder.Path)) return null;
+
+            StorageFile? conventionFile = await FindConventionFileAsync(folder);
+            ArtworkDecision decision = ArtworkResolver.Resolve(metadata, conventionFile is not null, recordedFileExists);
+
+            if (!decision.NeedsGeneration)
+            {
+                if (decision.Source is PosterSource.Convention && conventionFile is not null)
+                {
+                    // Convention posters are resolved on every navigation into a folder, so avoid
+                    // re-copying the file and re-writing the database row when nothing has changed.
+                    string conventionExtension = System.IO.Path.GetExtension(conventionFile.Name);
+                    if (ShouldSkipConventionCopy(metadata, conventionExtension, recordedFileExists))
+                    {
+                        return metadata?.PosterFile;
+                    }
+
+                    return await CopyIntoArtworkFolderAsync(folder, conventionFile, PosterSource.Convention);
+                }
+
+                return decision.FileName;
+            }
+
+            StorageFile? video = await FindFirstVideoAsync(folder, MaxRecursionDepth);
+            if (video is null)
+            {
+                _foldersWithoutArtwork.TryAdd(folder.Path, 0);
+                return null;
+            }
+
+            return await GenerateFrameAsync(folder, video);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to resolve poster artwork for '{Path}'.", folder.Path);
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<string?> SetManualPosterAsync(StorageFolder folder, StorageFile image)
+    {
+        try
+        {
+            _foldersWithoutArtwork.TryRemove(folder.Path, out _);
+            return await CopyIntoArtworkFolderAsync(folder, image, PosterSource.Manual);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to set manual poster for '{Path}'.", folder.Path);
+            return null;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> RemoveManualPosterAsync(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return false;
+        }
+
+        string? removedFile;
+        try
+        {
+            // The database operation decides whether there was a manual poster at all, atomically,
+            // and says which file it pointed at. Nothing is deleted on any other basis: the file of
+            // a poster that was not cleared still has a row pointing at it.
+            removedFile = await _databaseService.ClearManualFolderPosterAsync(folderPath);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to remove the manual poster for '{Path}'.", folderPath);
+            return false;
+        }
+
+        // Whatever happened above, the folder gets resolved afresh the next time it is shown.
+        _foldersWithoutArtwork.TryRemove(folderPath, out _);
+
+        if (removedFile is not { Length: > 0 })
+        {
+            return false;
+        }
+
+        // The row no longer references the file, so failing to delete it only leaves an orphan.
+        try
+        {
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            await TryDeleteArtworkFileAsync(artworkFolder, removedFile);
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Removed the manual poster for '{Path}' but could not delete '{Name}'.", folderPath, removedFile);
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath) || string.IsNullOrWhiteSpace(posterUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            // Checked here too, before spending a network round trip: a manual poster is never
+            // displaced, so a folder that already has one costs nothing to skip. The write below
+            // checks again immediately before committing - that second check, not this one, is the
+            // guarantee that actually matters, since a manual poster could be set while the
+            // download below is still in flight.
+            FolderMetadataDto? existing = await _databaseService.LoadFolderMetadataAsync(folderPath);
+            if (IsProtectedByManualPoster(existing))
+            {
+                return false;
+            }
+
+            byte[]? bytes = await DownloadPosterBytesAsync(posterUrl, ct);
+            if (bytes is not { Length: > 0 })
+            {
+                return false;
+            }
+
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            string fileName = BuildFileName(folderPath, PosterSource.Scraped, GetExtensionFromUrl(posterUrl));
+            StorageFile target = await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+            await FileIO.WriteBytesAsync(target, bytes);
+
+            if (!await TryWriteScrapedPosterRowAsync(folderPath, fileName))
+            {
+                // Lost a race against a manual poster set while the download was in flight -
+                // discard the file just written rather than leaving an orphaned image behind.
+                await TryDeleteArtworkFileAsync(artworkFolder, fileName);
+                return false;
+            }
+
+            _foldersWithoutArtwork.TryRemove(folderPath, out _);
+            return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to download and store a scraped poster for '{Path}'.", folderPath);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Guard-checks and records a downloaded scraped poster file for a folder, isolated from the
+    /// network and file-system steps <see cref="SetScrapedPosterAsync"/> also performs, so the
+    /// guarantee that a scrape can never overwrite a manual poster is verifiable against a real
+    /// database alone. Internal: not part of the public artwork contract.
+    /// <para>
+    /// Mirrors <see cref="RecordPosterAsync"/>'s own pattern: when this write supersedes a
+    /// different file (an AutoFrame or Convention poster, never a Manual one - that case already
+    /// returned above), the superseded file is deleted so it is not orphaned on disk forever. The
+    /// artwork folder is only resolved when a supersession actually needs deleting, so the common
+    /// case (no prior poster) never touches it at all.
+    /// </para>
+    /// </summary>
+    internal async Task<bool> TryWriteScrapedPosterRowAsync(string folderPath, string fileName)
+    {
+        FolderMetadataDto? existing = await _databaseService.LoadFolderMetadataAsync(folderPath);
+        if (IsProtectedByManualPoster(existing))
+        {
+            return false;
+        }
+
+        string? previousPosterFile = await _databaseService.SetFolderPosterAsync(folderPath, fileName, PosterSource.Scraped);
+        if (previousPosterFile is { Length: > 0 }
+            && !string.Equals(previousPosterFile, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            await TryDeleteArtworkFileAsync(artworkFolder, previousPosterFile);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when a folder's stored poster came from the user directly. This is the single guard
+    /// that keeps a scrape from ever clobbering it: the scrape coordinator never writes poster
+    /// columns directly, only through <see cref="SetScrapedPosterAsync"/> (see
+    /// <c>MetadataScrapeCoordinator</c>), so this is the only place that guarantee is enforced at
+    /// write time.
+    /// </summary>
+    private static bool IsProtectedByManualPoster(FolderMetadataDto? metadata) =>
+        metadata is { PosterSource: PosterSource.Manual };
+
+    private async Task<byte[]?> DownloadPosterBytesAsync(string posterUrl, CancellationToken ct)
+    {
+        // HTTPS only. Every supported provider serves its artwork over HTTPS, so accepting plain
+        // HTTP would add nothing but a window for a tampered image to be written into the library.
+        if (!Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps)
+        {
+            return null;
+        }
+
+        HttpClient client = GetOrCreateHttpClient();
+        using HttpResponseMessage response =
+            await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        long? expectedLength = response.Content.Headers.ContentLength;
+        byte[] bytes = await response.Content.ReadAsByteArrayAsync(ct);
+
+        // A body shorter than its declared length is a truncated download, not a poster -
+        // committing it would replace good artwork with a broken file.
+        if (bytes.Length == 0 || (expectedLength is > 0 && bytes.Length != expectedLength))
+        {
+            return null;
+        }
+
+        return bytes;
+    }
+
+    /// <summary>
+    /// Whether the poster-download client has been created. Lets tests prove a rejected URL was
+    /// turned away before anything network-capable came into existence, rather than merely
+    /// failing its download - both return <see langword="false"/>, so the result alone cannot
+    /// tell them apart.
+    /// </summary>
+    internal bool HasCreatedHttpClient => _httpClient is not null;
+
+    private HttpClient GetOrCreateHttpClient()
+    {
+        if (_httpClient is { } existing)
+        {
+            return existing;
+        }
+
+        lock (_httpClientLock)
+        {
+            return _httpClient ??= _httpMessageHandler is { } handler
+                ? new HttpClient(handler, disposeHandler: false) { Timeout = PosterDownloadTimeout }
+                : new HttpClient { Timeout = PosterDownloadTimeout };
+        }
+    }
+
+    private static string GetExtensionFromUrl(string posterUrl)
+    {
+        if (Uri.TryCreate(posterUrl, UriKind.Absolute, out Uri? uri))
+        {
+            string extension = System.IO.Path.GetExtension(uri.AbsolutePath);
+            if (ConventionExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+            {
+                return extension;
+            }
+        }
+
+        return ".jpg";
+    }
+
+    /// <inheritdoc/>
+    public async Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths)
+    {
+        // A rescan is the moment the app learns which folders still exist, so it is also the moment
+        // to drop rows for folders that do not. Without this nothing is ever evicted: rows are keyed
+        // on absolute path, so a deleted, renamed or moved folder leaves its row and its artwork
+        // file behind forever.
+        _foldersWithoutArtwork.Clear();
+        if (libraryFolderPaths.Count is 0) return;
+
+        try
+        {
+            List<FolderMetadataDto> storedRows = await _databaseService.ListFolderMetadataAsync();
+            if (storedRows.Count is 0) return;
+
+            StorageFolder artworkFolder = await GetArtworkFolderAsync();
+            foreach (FolderMetadataDto row in storedRows)
+            {
+                if (!IsOrphanedFolderPath(row.Path, libraryFolderPaths, System.IO.Directory.Exists)) continue;
+
+                await TryDeleteArtworkFileAsync(artworkFolder, row.PosterFile);
+                await _databaseService.DeleteFolderMetadataAsync(row.Path);
+                _logger.LogInformation("Evicted folder metadata for '{Path}'; the folder no longer exists.", row.Path);
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "Failed to prune orphaned folder artwork.");
+        }
+    }
+
+    /// <summary>
+    /// Deletes an artwork file together with the display card derived from it. This is the one
+    /// place any artwork file is deleted, so a card can never outlive its source through a
+    /// superseded poster, a removed custom image, a pruned folder or a discarded scrape.
+    /// </summary>
+    [DynamicWindowsRuntimeCast(typeof(StorageFile))]
+    private async Task TryDeleteArtworkFileAsync(StorageFolder artworkFolder, string? fileName)
+    {
+        if (fileName is not { Length: > 0 }) return;
+        _landscapeSources.TryRemove(fileName, out _);
+        try
+        {
+            if (await artworkFolder.TryGetItemAsync(fileName) is StorageFile file)
+            {
+                await file.DeleteAsync(StorageDeleteOption.PermanentDelete);
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to delete artwork file '{Name}'.", fileName);
+        }
+
+        // Attempted whether or not the source was there: a card whose source is already gone is
+        // exactly the orphan this is meant to prevent.
+        await TryDeleteCardAsync(artworkFolder, fileName);
+    }
+
+    private async Task<StorageFolder> GetArtworkFolderAsync() =>
+        string.IsNullOrEmpty(ArtworkFolderPath)
+            ? await ApplicationData.Current.LocalFolder.CreateFolderAsync(
+                ArtworkFolderName, CreationCollisionOption.OpenIfExists)
+            : await StorageFolder.GetFolderFromPathAsync(ArtworkFolderPath);
+
+    private static async Task<StorageFile?> FindConventionFileAsync(StorageFolder folder)
+    {
+        foreach (StorageFile file in await folder.GetFilesAsync())
+        {
+            if (IsConventionFileName(file.Name)) return file;
+        }
+
+        return null;
+    }
+
+    private async Task<StorageFile?> FindFirstVideoAsync(StorageFolder folder, int depth)
+    {
+        if (depth <= 0) return null;
+
+        IReadOnlyList<StorageFile> files;
+        try
+        {
+            files = await folder.GetFilesAsync();
+        }
+        catch (Exception e)
+        {
+            // A locked folder, a permissions failure, or a disconnected network path should not
+            // abort the search for the whole tree — just skip what can't be read.
+            _logger.LogWarning(e, "Failed to enumerate files in '{Path}' while searching for a video.", folder.Path);
+            return null;
+        }
+
+        StorageFile? video = files.FirstOrDefault(f => f.ContentType.StartsWith("video", StringComparison.OrdinalIgnoreCase));
+        if (video is not null) return video;
+
+        IReadOnlyList<StorageFolder> subfolders;
+        try
+        {
+            subfolders = await folder.GetFoldersAsync();
+        }
+        catch (Exception e)
+        {
+            _logger.LogWarning(e, "Failed to enumerate subfolders in '{Path}' while searching for a video.", folder.Path);
+            return null;
+        }
+
+        foreach (StorageFolder sub in subfolders)
+        {
+            StorageFile? found;
+            try
+            {
+                found = await FindFirstVideoAsync(sub, depth - 1);
+            }
+            catch (Exception e)
+            {
+                // One unreadable subtree (e.g. a locked "Extras" folder) should not cost the
+                // whole series its artwork - skip it and keep searching sibling subfolders.
+                _logger.LogWarning(e, "Failed to search subfolder '{Path}' for a video.", sub.Path);
+                continue;
+            }
+
+            if (found is not null) return found;
+        }
+
+        return null;
+    }
+
+    private async Task<string?> GenerateFrameAsync(StorageFolder folder, StorageFile video)
+    {
+        using StorageItemThumbnail thumbnail =
+            await video.GetThumbnailAsync(ThumbnailMode.SingleItem, requestedSize: 1280, ThumbnailOptions.UseCurrentScale);
+        if (thumbnail is not { Type: ThumbnailType.Image }) return null;
+
+        StorageFolder artworkFolder = await GetArtworkFolderAsync();
+        string fileName = BuildFileName(folder.Path, PosterSource.AutoFrame, ".jpg");
+        StorageFile target = await artworkFolder.CreateFileAsync(fileName, CreationCollisionOption.ReplaceExisting);
+
+        using (IRandomAccessStream output = await target.OpenAsync(FileAccessMode.ReadWrite))
+        {
+            BitmapDecoder decoder = await BitmapDecoder.CreateAsync(thumbnail);
+            BitmapEncoder encoder = await BitmapEncoder.CreateForTranscodingAsync(output, decoder);
+            await encoder.FlushAsync();
+        }
+
+        await RecordPosterAsync(folder.Path, fileName, PosterSource.AutoFrame, artworkFolder);
+        return fileName;
+    }
+
+    private async Task<string> CopyIntoArtworkFolderAsync(StorageFolder folder, StorageFile source, PosterSource kind)
+    {
+        StorageFolder artworkFolder = await GetArtworkFolderAsync();
+        string extension = System.IO.Path.GetExtension(source.Name);
+        string fileName = BuildFileName(folder.Path, kind, extension);
+        await source.CopyAsync(artworkFolder, fileName, NameCollisionOption.ReplaceExisting);
+        await RecordPosterAsync(folder.Path, fileName, kind, artworkFolder);
+        return fileName;
+    }
+
+    /// <summary>
+    /// Points the folder's row at the newly written file and removes the file it replaced.
+    /// The write touches only the poster columns, so it cannot roll back a custom title saved
+    /// between resolving the artwork and storing it.
+    /// </summary>
+    private async Task RecordPosterAsync(string folderPath, string fileName, PosterSource source, StorageFolder artworkFolder)
+    {
+        string? supersededFileName = await _databaseService.SetFolderPosterAsync(folderPath, fileName, source);
+        if (supersededFileName is not { Length: > 0 }
+            || string.Equals(supersededFileName, fileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        await TryDeleteArtworkFileAsync(artworkFolder, supersededFileName);
+    }
+
+    private static string BuildFileName(string folderPath, PosterSource source, string extension)
+    {
+        // The prefix marks where the file came from: "m_" is a deliberate user choice, "g_" is
+        // derived artwork the app can regenerate.
+        string prefix = source is PosterSource.Manual ? "m_" : "g_";
+        uint hash = 2166136261u;
+        foreach (char c in folderPath)
+        {
+            hash = (hash ^ char.ToLowerInvariant(c)) * 16777619u;
+        }
+
+        // Every write gets a fresh discriminator so replacement artwork lands on a new
+        // ms-appdata URI. XAML caches a BitmapImage by URI, so writing new bytes to the name the
+        // folder already used would keep showing the old image until the app restarts.
+        ulong discriminator = unchecked((ulong)DateTime.UtcNow.Ticks + (ulong)Interlocked.Increment(ref _artworkSequence));
+        return string.Concat(prefix, hash.ToString("x8"), "_", discriminator.ToString("x"), extension);
+    }
+
+    /// <inheritdoc/>
+    public void Dispose() => _httpClient?.Dispose();
+}

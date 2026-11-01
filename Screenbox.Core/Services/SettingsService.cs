@@ -47,6 +47,12 @@ public sealed class SettingsService : ISettingsService
     private const string PlayerGestureSlideVerticalKey = "Player/Gesture/SlideVertical";
     private const string PlayerGestureSlideHorizontalKey = "Player/Gesture/SlideHorizontal";
     private const string PlayerGesturePressAndHoldKey = "Player/Gesture/PressAndHold";
+    private const string PlayerWatchedThresholdPercentKey = "Player/WatchedThresholdPercent";
+    private const string MetadataEnabledKey = "Metadata/Enabled";
+    private const string MetadataUseAniListKey = "Metadata/UseAniList";
+    private const string MetadataUseJikanKey = "Metadata/UseJikan";
+    private const string MetadataUseTmdbKey = "Metadata/UseTmdb";
+    private const string MetadataTmdbApiKeyKey = "Metadata/TmdbApiKey";
 
     public bool UseIndexer
     {
@@ -252,6 +258,42 @@ public sealed class SettingsService : ISettingsService
         set => SetValue(PersistentAlbumsSortOrderKey, (int)value);
     }
 
+    public double WatchedThresholdPercent
+    {
+        get => GetValue<double>(PlayerWatchedThresholdPercentKey);
+        set => SetValue(PlayerWatchedThresholdPercentKey, value);
+    }
+
+    public bool MetadataEnabled
+    {
+        get => GetValue<bool>(MetadataEnabledKey);
+        set => SetValue(MetadataEnabledKey, value);
+    }
+
+    public bool MetadataUseAniList
+    {
+        get => GetValue<bool>(MetadataUseAniListKey);
+        set => SetValue(MetadataUseAniListKey, value);
+    }
+
+    public bool MetadataUseJikan
+    {
+        get => GetValue<bool>(MetadataUseJikanKey);
+        set => SetValue(MetadataUseJikanKey, value);
+    }
+
+    public bool MetadataUseTmdb
+    {
+        get => GetValue<bool>(MetadataUseTmdbKey);
+        set => SetValue(MetadataUseTmdbKey, value);
+    }
+
+    public string TmdbApiKey
+    {
+        get => GetValue<string>(MetadataTmdbApiKeyKey) ?? string.Empty;
+        set => SetValue(MetadataTmdbApiKeyKey, value);
+    }
+
     public SettingsService()
     {
         SetDefault(PlayerAutoResizeKey, (int)PlayerAutoResizeOption.Never);
@@ -283,6 +325,12 @@ public sealed class SettingsService : ISettingsService
         SetDefault(PlayerGestureSlideVerticalKey, true);
         SetDefault(PlayerGestureSlideHorizontalKey, true);
         SetDefault(PlayerGesturePressAndHoldKey, true);
+        SetDefault(PlayerWatchedThresholdPercentKey, WatchThreshold.DefaultPercent);
+        SetDefault(MetadataEnabledKey, false);        // the opt-in guarantee, in one line
+        SetDefault(MetadataUseAniListKey, false);
+        SetDefault(MetadataUseJikanKey, false);
+        SetDefault(MetadataUseTmdbKey, false);
+        SetDefault(MetadataTmdbApiKeyKey, string.Empty);
 
         // Device family specific overrides
         if (SystemInformation.IsXbox)

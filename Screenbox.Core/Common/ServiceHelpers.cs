@@ -57,6 +57,7 @@ public static class ServiceHelpers
         services.AddSingleton<PlayerContext>();
         services.AddSingleton<PlaylistsContext>();
         services.AddSingleton<RecentContext>();
+        services.AddSingleton<WatchStateContext>();
         services.AddSingleton<CastContext>();
         services.AddSingleton<LibraryContext>();
         services.AddSingleton<PlayQueueContext>();
@@ -66,11 +67,13 @@ public static class ServiceHelpers
         services.AddSingleton<ILibraryCoordinator, LibraryCoordinator>();
         services.AddSingleton<IPlayQueueCoordinator, PlayQueueCoordinator>();
         services.AddSingleton<IPlaybackProgressTracker, PlaybackProgressTracker>();
+        services.AddSingleton<IMetadataScrapeCoordinator, MetadataScrapeCoordinator>();
 
         // Services
         services.AddSingleton<IDatabaseService, DatabaseService>();
         services.AddSingleton<IPlayerService, PlayerService>();
         services.AddSingleton<IFilesService, FilesService>();
+        services.AddSingleton<IArtworkService, ArtworkService>();
         services.AddSingleton<ILibraryService, LibraryService>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IWindowService, WindowService>();
@@ -79,5 +82,13 @@ public static class ServiceHelpers
         services.AddSingleton<ISystemMediaTransportControlsService, SystemMediaTransportControlsService>();
         services.AddSingleton<IPlaybackControlService, PlaybackControlService>();
         services.AddSingleton<IPlaylistService, PlaylistService>();
+        services.AddSingleton<IWatchStateService, WatchStateService>();
+        services.AddSingleton<IFolderStatsService, FolderStatsService>();
+
+        // Metadata scraping is opt-in and off by default. Only the factory and the coordinator are
+        // registered here - never an HttpClient or a provider - so nothing network-capable is
+        // constructed at app startup. The factory constructs its single shared HttpClient lazily,
+        // on first use, only after the coordinator has confirmed the user opted in.
+        services.AddSingleton<IMetadataProviderFactory, MetadataProviderFactory>();
     }
 }
