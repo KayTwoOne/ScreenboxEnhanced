@@ -39,6 +39,16 @@ public sealed partial class StorageItemViewModel : ObservableObject
     [ObservableProperty] public partial string DisplayName { get; set; }
     [ObservableProperty] public partial FolderStats? Stats { get; set; }
 
+    /// <summary>Decode width for a poster drawn as it is.</summary>
+    private const int PosterDecodePixelWidth = 400;
+
+    /// <summary>
+    /// Decode width for a card: twice the 232 px wide tile, so it stays sharp at 200% display
+    /// scaling. Not the card's full 928 px, which would cost four times the memory for pixels the
+    /// tile cannot show.
+    /// </summary>
+    private const int CardDecodePixelWidth = 464;
+
     private readonly IFilesService _filesService;
     private readonly ILogger<StorageItemViewModel> _logger;
     private readonly IArtworkService _artworkService;
@@ -175,8 +185,15 @@ public sealed partial class StorageItemViewModel : ObservableObject
                 return;
             }
 
-            var uri = new Uri($"ms-appdata:///local/{ArtworkService.ArtworkFolderName}/{posterFile}");
-            var image = new BitmapImage(uri) { DecodePixelWidth = 400 };
+            // What is drawn can differ from the stored poster: portrait artwork is drawn from a
+            // derived wide card that shows it whole instead of centre-cropped. The service falls
+            // back to the poster itself when it cannot build one, so this never costs the artwork.
+            // No ConfigureAwait: Thumbnail is bound, and must be set back on the thread it always was.
+            string displayFile = await _artworkService.GetDisplayFileNameAsync(posterFile) ?? posterFile;
+            bool isCard = !string.Equals(displayFile, posterFile, StringComparison.OrdinalIgnoreCase);
+
+            var uri = new Uri($"ms-appdata:///local/{ArtworkService.ArtworkFolderName}/{displayFile}");
+            var image = new BitmapImage(uri) { DecodePixelWidth = isCard ? CardDecodePixelWidth : PosterDecodePixelWidth };
 
             // A poster file can still go missing or turn unreadable between the check and the
             // decode. Dropping the failed image restores the folder glyph rather than leaving a

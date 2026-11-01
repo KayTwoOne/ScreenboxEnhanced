@@ -447,10 +447,16 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
         }
     }
 
+    /// <summary>
+    /// Deletes an artwork file together with the display card derived from it. This is the one
+    /// place any artwork file is deleted, so a card can never outlive its source through a
+    /// superseded poster, a removed custom image, a pruned folder or a discarded scrape.
+    /// </summary>
     [DynamicWindowsRuntimeCast(typeof(StorageFile))]
     private async Task TryDeleteArtworkFileAsync(StorageFolder artworkFolder, string? fileName)
     {
         if (fileName is not { Length: > 0 }) return;
+        _landscapeSources.TryRemove(fileName, out _);
         try
         {
             if (await artworkFolder.TryGetItemAsync(fileName) is StorageFile file)
@@ -462,6 +468,10 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
         {
             _logger.LogWarning(e, "Failed to delete artwork file '{Name}'.", fileName);
         }
+
+        // Attempted whether or not the source was there: a card whose source is already gone is
+        // exactly the orphan this is meant to prevent.
+        await TryDeleteCardAsync(artworkFolder, fileName);
     }
 
     private async Task<StorageFolder> GetArtworkFolderAsync() =>

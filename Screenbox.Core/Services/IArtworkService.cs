@@ -25,6 +25,22 @@ public interface IArtworkService
     Task<string?> GetPosterFileNameAsync(StorageFolder folder, FolderMetadataDto? metadata);
 
     /// <summary>
+    /// Returns the file name within the local Artwork folder that should be DRAWN for a poster
+    /// returned by <see cref="GetPosterFileNameAsync"/>. A portrait-ish poster (width under 1.4x its
+    /// height) comes back as a derived wide card: the whole image, uncropped, centred on a blurred,
+    /// darkened wash of its own colours, sized so a wide folder tile does not centre-crop it to a
+    /// thin band. Any other image comes back unchanged. The card is cached beside the poster and
+    /// rebuilt when the poster is newer than it; the poster itself is never altered, so it stays
+    /// available at full size for anything that wants the whole portrait.
+    /// <para>
+    /// Never throws and never returns null for a non-empty name: when a card cannot be built, for
+    /// any reason, the original name comes back, so artwork never disappears over it.
+    /// </para>
+    /// </summary>
+    /// <param name="posterFileName">A poster file name as <see cref="GetPosterFileNameAsync"/> returned it.</param>
+    Task<string?> GetDisplayFileNameAsync(string? posterFileName);
+
+    /// <summary>
     /// Copies the chosen image into local storage and records it as the manual poster.
     /// Returns the stored file name.
     /// </summary>

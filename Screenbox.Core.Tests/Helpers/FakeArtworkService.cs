@@ -45,6 +45,10 @@ public sealed class FakeArtworkService : IArtworkService
         throw new NotSupportedException("MetadataScrapeCoordinator never resolves artwork for display.");
 
     /// <inheritdoc/>
+    public Task<string?> GetDisplayFileNameAsync(string? posterFileName) =>
+        throw new NotSupportedException("MetadataScrapeCoordinator never resolves artwork for display.");
+
+    /// <inheritdoc/>
     public Task<string?> SetManualPosterAsync(StorageFolder folder, StorageFile image) =>
         throw new NotSupportedException("MetadataScrapeCoordinator never sets a manual poster.");
 
