@@ -912,7 +912,7 @@
     <value>Scan library now</value>
   </data>
   <data name="SettingsMetadataScanNowDescription" xml:space="preserve">
-    <value>Look up metadata for folders in your library that do not have it yet</value>
+    <value>Search again for every folder in your library and refresh its poster</value>
   </data>
   <data name="ActiveArguments" xml:space="preserve">
     <value>Active arguments</value>
