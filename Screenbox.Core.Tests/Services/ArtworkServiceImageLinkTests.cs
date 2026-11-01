@@ -16,6 +16,12 @@ namespace Screenbox.Core.Tests.Services;
 /// anything else fetched" is half of what the guards promise.
 /// </summary>
 [Timeout(30_000)] // a fetch that hangs must fail its test, not stall the run
+// Runs alone, not alongside other test classes. Almost every test here encodes or decodes a real
+// image, and in this unpackaged test host a Windows imaging call (BitmapEncoder/BitmapDecoder
+// .CreateAsync) fails intermittently with E_INVALIDARG while another thread is inside
+// StorageFolder.CreateFileAsync, which other test classes call. Isolating the class takes both
+// halves of that race out of the picture; nothing here depends on running concurrently.
+[NotInParallel]
 public sealed class ArtworkServiceImageLinkTests
 {
     private const string PageUrl = "https://example.com/gallery/p";
@@ -656,15 +662,63 @@ public sealed class ArtworkServiceImageLinkTests
         await Assert.That(result.Failure).IsEqualTo(ImageLinkFailure.NotAnImage);
     }
 
+    // Content-Type is only a claim. Real images are served as octet-stream, or with no type at all
+    // (Dropbox ?dl=1 links, several CDNs), so only a page is treated differently and the decode
+    // check decides everything else.
+
     [Test]
-    [Arguments("application/json")]
     [Arguments("application/octet-stream")]
+    [Arguments("binary/octet-stream")]
+    [Arguments("application/json")]
     [Arguments("text/plain")]
-    public async Task Response_ThatIsNeitherAnImageNorAPage_IsRejected(string contentType)
+    public async Task RealPng_ServedWithANonImageContentType_IsAccepted(string contentType)
     {
         using var rig = new Rig();
-        // Genuine PNG bytes: only the content type can be what turns this away.
-        rig.Image(ImageUrl, await TestImages.TinyPngAsync(), contentType);
+        byte[] png = await TestImages.TinyPngAsync();
+        rig.Image(ImageUrl, png, contentType);
+
+        ImageLinkResult result = await rig.FetchAsync(ImageUrl);
+
+        await Assert.That(result.IsSuccess).IsTrue();
+        await Assert.That(result.Image!.FileType).IsEqualTo(".png");
+        await Assert.That(await SameBytesAsync(result, png)).IsTrue();
+    }
+
+    [Test]
+    public async Task RealJpeg_ServedWithNoContentType_IsAccepted()
+    {
+        using var rig = new Rig();
+        byte[] jpeg = await TestImages.TinyJpegAsync();
+        rig.Route(ImageUrl, () => Bytes(jpeg, contentType: null));
+
+        ImageLinkResult result = await rig.FetchAsync(ImageUrl);
+
+        await Assert.That(result.IsSuccess).IsTrue();
+        await Assert.That(result.Image!.FileType).IsEqualTo(".jpg");
+        await Assert.That(await SameBytesAsync(result, jpeg)).IsTrue();
+    }
+
+    [Test]
+    [Arguments("application/octet-stream")]
+    [Arguments("application/json")]
+    [Arguments("text/plain")]
+    public async Task NonImageBytes_ServedWithANonImageContentType_AreRejectedAsNotAnImage(string contentType)
+    {
+        using var rig = new Rig();
+        rig.Image(ImageUrl, Encoding.ASCII.GetBytes("this is not a picture"), contentType);
+
+        ImageLinkResult result = await rig.FetchAsync(ImageUrl);
+
+        await Assert.That(result.IsSuccess).IsFalse();
+        await Assert.That(result.Failure).IsEqualTo(ImageLinkFailure.NotAnImage);
+        await Assert.That(rig.TempFiles()).IsEmpty();
+    }
+
+    [Test]
+    public async Task NonImageBytes_ServedWithNoContentType_AreRejectedAsNotAnImage()
+    {
+        using var rig = new Rig();
+        rig.Route(ImageUrl, () => Bytes(Encoding.ASCII.GetBytes("not a picture"), contentType: null));
 
         ImageLinkResult result = await rig.FetchAsync(ImageUrl);
 
@@ -672,15 +726,48 @@ public sealed class ArtworkServiceImageLinkTests
     }
 
     [Test]
-    public async Task Response_WithNoContentType_IsRejected()
+    public async Task ImageNamedByAPage_ServedAsOctetStream_IsAccepted()
     {
         using var rig = new Rig();
         byte[] png = await TestImages.TinyPngAsync();
-        rig.Route(ImageUrl, () => Bytes(png, contentType: null));
+        rig.Page(PageUrl, PageWith("""<meta property="og:image" content="https://i.example.com/a.png">"""));
+        rig.Image(ImageUrl, png, "application/octet-stream");
+
+        ImageLinkResult result = await rig.FetchAsync(PageUrl);
+
+        await Assert.That(result.IsSuccess).IsTrue();
+        await Assert.That(await SameBytesAsync(result, png)).IsTrue();
+        await Assert.That(Order(rig.Requests)).IsEqualTo(Order(PageUrl, ImageUrl));
+    }
+
+    [Test]
+    public async Task OctetStream_DeclaringALengthOverTheCap_IsStillRejectedAsTooLarge()
+    {
+        // Dropping the content-type gate must not drop the size cap with it.
+        using var rig = new Rig();
+        rig.Service.MaxImageLinkBytes = 4096;
+        rig.Route(ImageUrl, () => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new UnreadableBodyContent("application/octet-stream", declaredLength: 50_000_000)
+        });
 
         ImageLinkResult result = await rig.FetchAsync(ImageUrl);
 
-        await Assert.That(result.Failure).IsEqualTo(ImageLinkFailure.NotAnImage);
+        await Assert.That(result.Failure).IsEqualTo(ImageLinkFailure.TooLarge);
+    }
+
+    [Test]
+    public async Task OctetStream_WithNoDeclaredLength_IsStillCutOffAtTheCap()
+    {
+        using var rig = new Rig();
+        rig.Service.MaxImageLinkBytes = 4096;
+        UnknownLengthContent body = new("application/octet-stream", new byte[1_000_000]);
+        rig.Route(ImageUrl, () => new HttpResponseMessage(HttpStatusCode.OK) { Content = body });
+
+        ImageLinkResult result = await rig.FetchAsync(ImageUrl);
+
+        await Assert.That(result.Failure).IsEqualTo(ImageLinkFailure.TooLarge);
+        await Assert.That(body.BytesServed).IsLessThan(100_000);
     }
 
     [Test]

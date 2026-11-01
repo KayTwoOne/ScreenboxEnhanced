@@ -95,7 +95,7 @@ public sealed partial class ArtworkService
         HttpClient client = GetOrCreateHttpClient();
         using HttpRequestMessage request = new(HttpMethod.Get, uri);
         request.Headers.UserAgent.ParseAdd(ImageLinkUserAgent);
-        request.Headers.Accept.ParseAdd(allowPage ? "image/*, text/html;q=0.9" : "image/*");
+        request.Headers.Accept.ParseAdd(allowPage ? "image/*, text/html;q=0.9, */*;q=0.1" : "image/*, */*;q=0.1");
         using HttpResponseMessage response =
             await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         if (!response.IsSuccessStatusCode)
@@ -112,14 +112,20 @@ public sealed partial class ArtworkService
         }
 
         string? mediaType = response.Content.Headers.ContentType?.MediaType;
-        if (mediaType is not null && mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        bool isPage = string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mediaType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase);
+        if (!isPage)
         {
+            // Anything that is not a page is a candidate image, whatever it says it is, or says
+            // nothing at all: hosts routinely serve real images as application/octet-stream (a
+            // Dropbox ?dl=1 link, several CDNs). Content-Type is only a claim, so it is not what
+            // decides. The size cap and the decode check in ReadAndSaveImageAsync are.
             return await ReadAndSaveImageAsync(response.Content, ct);
         }
 
-        bool isPage = string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(mediaType, "application/xhtml+xml", StringComparison.OrdinalIgnoreCase);
-        if (!allowPage || !isPage)
+        // A page where an image was expected: the image a page named turned out to be another
+        // page. One hop only, so it is not read for yet another address.
+        if (!allowPage)
         {
             return ImageLinkResult.Failed(ImageLinkFailure.NotAnImage);
         }
