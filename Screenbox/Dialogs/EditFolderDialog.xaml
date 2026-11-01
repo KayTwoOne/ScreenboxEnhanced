@@ -7,7 +7,9 @@
     xmlns:strings="using:Screenbox.Strings"
     Title="{x:Bind strings:Resources.EditFolder}"
     CloseButtonText="{x:Bind strings:Resources.Cancel}"
+    Closed="EditFolderDialog_OnClosed"
     DefaultButton="Primary"
+    PrimaryButtonClick="EditFolderDialog_OnPrimaryButtonClick"
     PrimaryButtonText="{x:Bind strings:Resources.Save}"
     Style="{StaticResource DefaultContentDialogStyle}"
     mc:Ignorable="d">
@@ -22,6 +24,40 @@
             Click="ChooseImageButton_OnClick"
             Content="{x:Bind strings:Resources.ChooseImage}"
             HorizontalAlignment="Stretch" />
+        <StackPanel Spacing="4">
+            <TextBox
+                x:Name="ImageLinkTextBox"
+                Header="{x:Bind strings:Resources.ImageLinkHeader}"
+                InputScope="Url"
+                Paste="ImageLinkTextBox_OnPaste"
+                PlaceholderText="{x:Bind strings:Resources.ImageLinkPlaceholder}"
+                TextChanged="ImageLinkTextBox_OnTextChanged" />
+            <Grid
+                x:Name="ImageLinkStatus"
+                ColumnSpacing="8"
+                Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ProgressRing
+                    x:Name="ImageLinkProgress"
+                    Width="16"
+                    Height="16"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    IsActive="False"
+                    Visibility="Collapsed" />
+                <TextBlock
+                    x:Name="ImageLinkError"
+                    Grid.Column="1"
+                    AutomationProperties.LiveSetting="Assertive"
+                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
+            </Grid>
+        </StackPanel>
         <Button
             x:Name="RemoveImageButton"
             Click="RemoveImageButton_OnClick"
@@ -35,10 +71,18 @@
             Text="{x:Bind strings:Resources.CustomImageWillBeRemoved}"
             TextWrapping="Wrap"
             Visibility="Collapsed" />
-        <Image
-            x:Name="PreviewImage"
-            MaxHeight="200"
-            Stretch="Uniform"
-            Visibility="Collapsed" />
+        <StackPanel Spacing="4">
+            <Image
+                x:Name="PreviewImage"
+                MaxHeight="200"
+                Stretch="Uniform"
+                Visibility="Collapsed" />
+            <TextBlock
+                x:Name="PreviewSourceNote"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                HorizontalAlignment="Center"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Visibility="Collapsed" />
+        </StackPanel>
     </StackPanel>
 </ContentDialog>

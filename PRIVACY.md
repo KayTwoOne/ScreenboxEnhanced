@@ -25,4 +25,7 @@ When it is on, a lookup works as follows:
 
 Each service's own privacy policy governs what it does with the requests it receives. You can turn the feature off at any time. Already-downloaded posters, synopses and release years stay on your device until you change or remove them. A lookup never renames your folders: the names you see are always your own.
 
+## Pasted image links
+When you paste an image link into Edit folder, the app downloads the image from that address over HTTPS (and, if the link is a web page, the image that page points to) and saves it on your device as the folder's poster.
+
 This product uses the TMDB API but is not endorsed or certified by TMDB.

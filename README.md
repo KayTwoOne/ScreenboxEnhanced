@@ -40,7 +40,7 @@ Home picks up where you left off, with a Continue Watching row above your recent
 
 ### Make each folder your own
 
-Give any folder a display name and poster of your choosing, and remove a custom poster to go back to automatic artwork. Your choices always take priority over anything found online.
+Give any folder a display name and poster of your choosing, and remove a custom poster to go back to automatic artwork. Pick a poster from a file, or paste a link to an image hosted anywhere (an Imgur page works too) and it is fetched for you. Your choices always take priority over anything found online.
 
 ![Screenshot of the Edit folder dialog, with options to choose an image or remove the custom image.](/assets/images/docs/PC-EditFolder-Dark.png)
 
