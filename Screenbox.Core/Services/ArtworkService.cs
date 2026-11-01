@@ -58,10 +58,26 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
     private readonly object _httpClientLock = new();
     private HttpClient? _httpClient;
 
+    // Null in production, where the client is built over its own default handler. Tests hand in a
+    // handler that answers from memory, so nothing they exercise can reach the network.
+    private readonly HttpMessageHandler? _httpMessageHandler;
+
     public ArtworkService(IDatabaseService databaseService, ILogger<ArtworkService> logger)
+        : this(databaseService, logger, httpMessageHandler: null)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: builds the service over a caller-supplied <see cref="HttpMessageHandler"/>.
+    /// Internal on purpose, so dependency injection - which only considers public constructors -
+    /// keeps constructing the service the way it always has. The handler is not disposed here.
+    /// </summary>
+    internal ArtworkService(
+        IDatabaseService databaseService, ILogger<ArtworkService> logger, HttpMessageHandler? httpMessageHandler)
     {
         _databaseService = databaseService;
         _logger = logger;
+        _httpMessageHandler = httpMessageHandler;
     }
 
     /// <summary>
@@ -398,7 +414,9 @@ public sealed partial class ArtworkService : IArtworkService, IDisposable
 
         lock (_httpClientLock)
         {
-            return _httpClient ??= new HttpClient { Timeout = PosterDownloadTimeout };
+            return _httpClient ??= _httpMessageHandler is { } handler
+                ? new HttpClient(handler, disposeHandler: false) { Timeout = PosterDownloadTimeout }
+                : new HttpClient { Timeout = PosterDownloadTimeout };
         }
     }
 

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Screenbox.Core.Enums;
 using Screenbox.Core.Models;
 using Windows.Storage;
 
@@ -45,6 +46,26 @@ public interface IArtworkService
     /// Returns the stored file name.
     /// </summary>
     Task<string?> SetManualPosterAsync(StorageFolder folder, StorageFile image);
+
+    /// <summary>
+    /// Fetches the image behind a link the user pasted and, when it is a real image, saves it to a
+    /// temporary file that <see cref="SetManualPosterAsync"/> accepts like any file the user picked.
+    /// The link may point straight at an image, or at a web page, in which case the one image the
+    /// page names as its Open Graph (or Twitter card) image is fetched instead. Nothing further is
+    /// followed from that image, and nothing but https is ever requested.
+    /// <para>
+    /// Every way a link can be unusable comes back as an <see cref="ImageLinkFailure"/> rather than
+    /// an exception: the address is not https, the answer is not a decodable image, it is too
+    /// large, the page names no image, the download failed, or it took too long.
+    /// </para>
+    /// </summary>
+    /// <param name="url">The link as pasted. Surrounding whitespace is ignored.</param>
+    /// <param name="ct">Cancels the fetch, for example when the user keeps typing.</param>
+    /// <exception cref="System.OperationCanceledException">
+    /// <paramref name="ct"/> was cancelled. A timeout is not this: it comes back as
+    /// <see cref="ImageLinkFailure.TimedOut"/>.
+    /// </exception>
+    Task<ImageLinkResult> FetchImageFromLinkAsync(string url, CancellationToken ct);
 
     /// <summary>
     /// Removes a folder's manual poster, deleting its artwork file, so the folder can return to

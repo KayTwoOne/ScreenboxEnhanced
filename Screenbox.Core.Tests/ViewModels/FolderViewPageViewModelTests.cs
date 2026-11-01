@@ -85,6 +85,7 @@ public sealed class FolderViewPageViewModelTests
         public Task<string?> GetDisplayFileNameAsync(string? posterFileName) => throw new NotSupportedException();
         public Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths) => throw new NotSupportedException();
         public Task<bool> SetScrapedPosterAsync(string folderPath, string posterUrl, CancellationToken ct) => throw new NotSupportedException();
+        public Task<ImageLinkResult> FetchImageFromLinkAsync(string url, CancellationToken ct) => throw new NotSupportedException();
     }
 
     [Test]

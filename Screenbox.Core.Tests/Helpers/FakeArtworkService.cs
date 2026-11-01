@@ -59,4 +59,8 @@ public sealed class FakeArtworkService : IArtworkService
     /// <inheritdoc/>
     public Task PruneOrphanedArtworkAsync(IReadOnlyList<string> libraryFolderPaths) =>
         throw new NotSupportedException("MetadataScrapeCoordinator never prunes artwork.");
+
+    /// <inheritdoc/>
+    public Task<ImageLinkResult> FetchImageFromLinkAsync(string url, CancellationToken ct) =>
+        throw new NotSupportedException("MetadataScrapeCoordinator never fetches a pasted image link.");
 }

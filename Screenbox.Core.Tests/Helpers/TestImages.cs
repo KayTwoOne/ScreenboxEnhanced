@@ -57,7 +57,21 @@ internal static class TestImages
     public static Task SaveJpegAsync(string path, byte[] pixels, int width, int height, ushort orientation) =>
         SaveAsync(path, BitmapEncoder.JpegEncoderId, pixels, width, height, orientation);
 
+    /// <summary>A real, valid PNG file's bytes: a small solid-colour image, encoded by the Windows codec.</summary>
+    public static Task<byte[]> TinyPngAsync(int width = 4, int height = 4) =>
+        EncodeAsync(BitmapEncoder.PngEncoderId, Solid(width, height, new Rgb(200, 30, 30)), width, height, orientation: null);
+
+    /// <summary>A real, valid JPEG file's bytes: a small solid-colour image, encoded by the Windows codec.</summary>
+    public static Task<byte[]> TinyJpegAsync(int width = 8, int height = 8) =>
+        EncodeAsync(BitmapEncoder.JpegEncoderId, Solid(width, height, new Rgb(30, 30, 200)), width, height, orientation: null);
+
     private static async Task SaveAsync(string path, Guid encoderId, byte[] pixels, int width, int height, ushort? orientation)
+    {
+        byte[] bytes = await EncodeAsync(encoderId, pixels, width, height, orientation);
+        await File.WriteAllBytesAsync(path, bytes);
+    }
+
+    private static async Task<byte[]> EncodeAsync(Guid encoderId, byte[] pixels, int width, int height, ushort? orientation)
     {
         using InMemoryRandomAccessStream stream = new();
         BitmapEncoder encoder = await BitmapEncoder.CreateAsync(encoderId, stream);
@@ -77,7 +91,7 @@ internal static class TestImages
         await reader.LoadAsync((uint)stream.Size);
         byte[] bytes = new byte[stream.Size];
         reader.ReadBytes(bytes);
-        await File.WriteAllBytesAsync(path, bytes);
+        return bytes;
     }
 
     /// <summary>Decodes an image file as stored: no EXIF orientation, no colour management.</summary>
