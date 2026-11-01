@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="128" align="center" src="Screenbox/Assets/StoreLogo.scale-400.png">
+  <img width="128" align="center" src="Screenbox/Assets/StoreLogo.scale-400.png" alt="Screenbox Enhanced logo">
 </p>
 <h1 align="center">
   Screenbox Enhanced
@@ -12,23 +12,47 @@ Screenbox Enhanced is a fork of [Screenbox](https://github.com/huynhsontung/Scre
 
 Screenbox is licensed under GPL-3.0, and so is this fork. Credit for the player belongs to the original project. If you just want a great player, [get Screenbox from the Microsoft Store](https://www.microsoft.com/store/apps/9NTSNMSVCB5L).
 
-## What this fork adds
-
-- **Folder artwork and titles** - pick your own poster and display name for any library folder, or let it use `poster.jpg` / `folder.jpg` or a frame from the first episode
-- **Watched tracking** - episodes are marked watched as you finish them, with progress bars and a Continue Watching row on Home
-- **Episode awareness** - episode numbers and titles are parsed from file names, so a season reads as an ordered list
-- **Folder summaries** - each folder shows its episode count, total runtime and how many are unwatched
-- **Optional online metadata** - look up posters, synopses and years from AniList, Jikan and TMDB. This is off by default and sends nothing until you enable it. See the [privacy policy](PRIVACY.md).
-
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="/assets/images/docs/PC-HeroHomePage-Dark.png?raw=true">
-  <source media="(prefers-color-scheme: light)" srcset="/assets/images/docs/PC-HeroHomePage-Light.png?raw=true">
-  <img alt="Screenshot of the Screenbox home page." src="/assets/images/docs/PC-HeroHomePage-Dark.png?raw=true" width="1248">
+  <source media="(prefers-color-scheme: dark)" srcset="/assets/images/docs/PC-HeroVideosPage-Dark.png?raw=true">
+  <source media="(prefers-color-scheme: light)" srcset="/assets/images/docs/PC-HeroVideosPage-Light.png?raw=true">
+  <img alt="Screenshot of the Screenbox Enhanced video library, showing series posters with episode counts, runtimes and unwatched totals." src="/assets/images/docs/PC-HeroVideosPage-Dark.png?raw=true" width="1248">
 </picture>
 
-![Screenshot of the Screenbox video player](/assets/images/docs/PC-HeroPlayerPageVideo_Dark.png)
+## What this fork adds
 
-Everything from Screenbox carries over:
+### A library that knows your series
+
+Every folder shows how many episodes it holds, their total runtime and how many you haven't watched yet. Episode numbers and titles are read from file names, so a season reads as an ordered list rather than a pile of files.
+
+Artwork comes from a `poster.jpg` or `folder.jpg` in the folder, an image you pick yourself, or a frame from the first episode. With [online metadata](#optional-online-posters) switched on, it can also come from AniList, Jikan or TMDB.
+
+### Watched tracking
+
+Episodes are marked watched as you finish them, and partly watched ones show how far you got. Right-click any episode to mark it watched or unwatched yourself, for something you watched elsewhere or skipped through.
+
+![Screenshot of a season, with watched ticks on finished episodes, a progress bar on the episode in progress, and the Mark as watched menu open.](/assets/images/docs/PC-WatchedTracking-Dark.png)
+
+### Continue Watching
+
+Home picks up where you left off, with a Continue Watching row above your recent media.
+
+![Screenshot of the Home page with a Continue Watching row and the mini player.](/assets/images/docs/PC-HomeContinueWatching-Dark.png)
+
+### Make each folder your own
+
+Give any folder a display name and poster of your choosing, and remove a custom poster to go back to automatic artwork. Your choices always take priority over anything found online.
+
+![Screenshot of the Edit folder dialog, with options to choose an image or remove the custom image.](/assets/images/docs/PC-EditFolder-Dark.png)
+
+### Optional online posters
+
+Turn on online metadata in Settings to fetch posters from AniList, Jikan (an unofficial MyAnimeList API) and TMDB, using your own TMDB key. It is off by default and sends nothing until you switch it on. Only a cleaned-up folder name is sent, and your folder names are never changed. See the [privacy policy](PRIVACY.md).
+
+![Screenshot of the Online metadata settings with AniList and Jikan enabled.](/assets/images/docs/PC-OnlineMetadata-Dark.png)
+
+## Everything from Screenbox
+
+![Screenshot of the Screenbox video player](/assets/images/docs/PC-HeroPlayerPageVideo_Dark.png)
 
 - Fluent design user interface
 - Gesture support for seeking and changing volume
@@ -38,7 +62,6 @@ Everything from Screenbox carries over:
 - Save the video frame as an image
 - Chromecast support
 - Browse and play media over the network
-
 
 ## Install
 
