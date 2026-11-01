@@ -47,19 +47,23 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     /// <inheritdoc/>
     public async Task<MetadataMatch?> ScrapeFolderAsync(string folderPath, string folderName, CancellationToken ct)
     {
-        (MetadataMatch? match, bool _) = await ScrapeFolderCoreAsync(folderPath, folderName, ct);
+        (MetadataMatch? match, bool _) = await ScrapeFolderCoreAsync(folderPath, folderName, refresh: false, ct);
         return match;
     }
 
     /// <summary>
-    /// Does the actual work behind <see cref="ScrapeFolderAsync"/>, additionally reporting whether
-    /// this call reached a provider over the network (as opposed to short-circuiting from the scrape
-    /// cache, the disabled gate, a specials folder, or an empty query) - <see cref="ScrapeLibraryAsync"/>
-    /// needs that bit to know whether the inter-folder throttle applies. This is also the single
+    /// Does the actual work behind <see cref="ScrapeFolderAsync"/> and <see cref="ScrapeLibraryAsync"/>,
+    /// additionally reporting whether this call reached a provider over the network (as opposed to
+    /// short-circuiting from the scrape cache, the disabled gate, a specials folder, or an empty
+    /// query) - <see cref="ScrapeLibraryAsync"/> needs that bit to know whether the inter-folder
+    /// throttle applies. <paramref name="refresh"/> is what separates the two callers: a single-folder
+    /// scrape trusts the scrape cache, while the library scan the user starts explicitly ignores it
+    /// (see <see cref="ScrapeLibraryAsync"/>). This is also the single
     /// place a fresh match's poster is downloaded and stored (via
     /// <see cref="IArtworkService.SetScrapedPosterAsync"/>), so both <see cref="ScrapeFolderAsync"/>
     /// and <see cref="ScrapeLibraryAsync"/> apply artwork the same way - a cached reconstruction
-    /// never carries a poster URL, so that branch never reaches this step.
+    /// never carries a poster URL, so that branch never reaches this step, which is exactly why a
+    /// refresh must not take it.
     /// <para>
     /// A scrape never writes the folder's title. <c>custom_title</c> is user data; the scraped
     /// synopsis and year are cache data and stay in <c>folder_scrape_cache</c>. The provider's title
@@ -69,7 +73,7 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
     /// </para>
     /// </summary>
     private async Task<(MetadataMatch? Match, bool HitNetwork)> ScrapeFolderCoreAsync(
-        string folderPath, string folderName, CancellationToken ct)
+        string folderPath, string folderName, bool refresh, CancellationToken ct)
     {
         // The whole feature is opt-in. Nothing below this line may run - not the cache read, and
         // certainly not a provider - until the user has turned the master toggle on. This is the
@@ -92,7 +96,7 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         string query = ResolveQuery(folderPath, folderName);
 
         FolderScrapeCacheDto? cached = await _databaseService.LoadScrapeCacheAsync(folderPath);
-        if (cached is not null)
+        if (cached is not null && !refresh)
         {
             // Already scraped (matched or not) - short-circuit without touching a provider, and
             // therefore without costing a request the throttle needs to account for.
@@ -113,7 +117,15 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
         // it produced an accepted match.
         if (accepted is null)
         {
-            await SaveNoMatchAsync(folderPath);
+            // A refresh that comes back empty-handed proves nothing about an earlier match: a
+            // provider reports a network failure, a rate limit and "no such title" alike as an empty
+            // result. So it must not turn a cached match into a no-match. (Outside a refresh the
+            // cache was empty to begin with, and a no-match is recorded as ever.)
+            if (cached is not { Provider.Length: > 0, ProviderId.Length: > 0 })
+            {
+                await SaveNoMatchAsync(folderPath);
+            }
+
             return (null, true);
         }
 
@@ -177,7 +189,11 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
 
             try
             {
-                (_, hitNetwork) = await ScrapeFolderCoreAsync(folder.Path, folderName, ct);
+                // refresh: this is the scan the user starts from Settings, so it re-searches every
+                // eligible folder and downloads its poster again rather than trusting the cache - the
+                // cache stores no poster URL, so without this nothing already scraped (at whatever
+                // resolution it was scraped at) could ever be upgraded.
+                (_, hitNetwork) = await ScrapeFolderCoreAsync(folder.Path, folderName, refresh: true, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -196,9 +212,10 @@ public sealed class MetadataScrapeCoordinator : IMetadataScrapeCoordinator
             bool isLastFolder = i == knownFolders.Count - 1;
             if (hitNetwork && !isLastFolder)
             {
-                // Only a folder that actually made a provider request costs the throttle - a
-                // cache-only rescan must run at full speed. The token is honoured here so a
-                // cancelled scan stops promptly instead of sitting out the rest of the delay.
+                // Only a folder that actually made a provider request costs the throttle - one that
+                // was turned away (a specials folder, an empty query) must not wait. The token is
+                // honoured here so a cancelled scan stops promptly instead of sitting out the rest
+                // of the delay.
                 await Task.Delay(_interFolderDelay, ct);
             }
         }

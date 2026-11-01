@@ -48,11 +48,22 @@ public interface IMetadataScrapeCoordinator
     /// no-op that immediately reports completion when the feature is disabled. A failure scraping
     /// one folder is logged and does not abort the scan of the rest.
     /// <para>
+    /// This is the scan the user starts explicitly, and it REFRESHES: every eligible folder is
+    /// searched again and its poster downloaded again, ignoring any result already in the scrape
+    /// cache. The cache records which title matched but not the poster's URL, so trusting it would
+    /// mean artwork scraped once - at whatever resolution a provider then served - could never be
+    /// replaced. The rules that keep a scrape safe are unchanged: nothing runs until the feature is
+    /// enabled, specials folders are skipped entirely, a season folder is searched under its parent
+    /// and receives the poster but never a title, a <see cref="Enums.PosterSource.Manual"/> poster
+    /// is never replaced, and no title is ever written. A refresh that finds nothing keeps the
+    /// earlier cached match, since an empty answer may only mean the provider was unreachable.
+    /// </para>
+    /// <para>
     /// A short, fixed delay is inserted between folders that actually reach a provider over the
-    /// network, to stay under the providers' documented rate limits during a first scan of a fresh
-    /// cache. A folder that short-circuits from the scrape cache costs no request and is never
-    /// delayed, so a rescan of an already-scraped library runs at full speed. The delay honours
-    /// <paramref name="ct"/>, so a cancelled scan stops promptly rather than waiting it out.
+    /// network, to stay under the providers' documented rate limits - which, as nothing is served
+    /// from the cache here, is every folder except those turned away before a search (specials
+    /// folders, folders with no searchable name). The delay honours <paramref name="ct"/>, so a
+    /// cancelled scan stops promptly rather than waiting it out.
     /// </para>
     /// </summary>
     Task ScrapeLibraryAsync(IProgress<int>? progress, CancellationToken ct);

@@ -261,6 +261,36 @@ public sealed class ArtworkServiceTests
     }
 
     [Test]
+    public async Task TryWriteScrapedPosterRowAsync_ExistingScrapedPoster_IsReplacedAndItsFileDeleted()
+    {
+        // What an explicit rescan does to a poster it scraped before: the new download replaces the
+        // old one, and the old image does not linger on disk beside it.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        const string oldFileName = "g_first_scrape.jpg";
+        const string newFileName = "g_second_scrape.jpg";
+        await db.SetFolderPosterAsync(path, oldFileName, PosterSource.Scraped);
+
+        using var artworkFixture = new TestDirectoryFixture();
+        StorageFolder artworkFolder = await StorageFolder.GetFolderFromPathAsync(artworkFixture.DirectoryPath);
+        await artworkFolder.CreateFileAsync(oldFileName, CreationCollisionOption.ReplaceExisting);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance)
+        {
+            ArtworkFolderPath = artworkFixture.DirectoryPath
+        };
+
+        bool written = await artworkService.TryWriteScrapedPosterRowAsync(path, newFileName);
+
+        await Assert.That(written).IsTrue();
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.PosterFile).IsEqualTo(newFileName);
+        await Assert.That(persisted.PosterSource).IsEqualTo(PosterSource.Scraped);
+        await Assert.That(await artworkFolder.TryGetItemAsync(oldFileName)).IsNull()
+            .Because("The scraped poster this rescan replaced must be deleted, not left orphaned on disk.");
+    }
+
+    [Test]
     public async Task SetScrapedPosterAsync_EmptyPosterUrl_ReturnsFalseWithoutTouchingTheDatabase()
     {
         // The public entry point's own cheap input guard, ahead of anything else it would need to

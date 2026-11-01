@@ -529,28 +529,21 @@ public sealed class MetadataScrapeCoordinatorTests
     // ------------------------------------------------------------------
 
     [Test]
-    public async Task ScrapeLibraryAsync_AllFoldersCached_DoesNotThrottleBetweenThem()
+    public async Task ScrapeLibraryAsync_FoldersTurnedAwayBeforeASearch_DoNotThrottleBetweenThem()
     {
         using var fixture = new TestDirectoryFixture();
         DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
 
-        const string pathA = @"D:\Anime\Dan Da Dan";
-        const string pathB = @"D:\Anime\Frieren";
-        await db.SetFolderCustomTitleAsync(pathA, "Dan Da Dan");
-        await db.SetFolderCustomTitleAsync(pathB, "Frieren");
-        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
-        {
-            Path = pathA, Provider = "anilist", ProviderId = "1", LastScraped = DateTimeOffset.UtcNow
-        });
-        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
-        {
-            Path = pathB, Provider = "anilist", ProviderId = "2", LastScraped = DateTimeOffset.UtcNow
-        });
+        // Specials folders are never searched, so they cost no request and must not wait.
+        const string pathA = @"D:\Anime\Frieren\Extras";
+        const string pathB = @"D:\Anime\Frieren\NCOP & NCED";
+        await db.SetFolderCustomTitleAsync(pathA, null);
+        await db.SetFolderCustomTitleAsync(pathB, null);
 
-        var provider = new FakeMetadataProvider("anilist");
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("1", "Frieren", null, null, null)]);
         var settings = new TestSettingsService { MetadataEnabled = true };
-        // 30s: if the coordinator mistakenly throttled between these cache-only folders, this test
-        // would take over 30s to complete instead of the well-under-5s asserted below.
+        // 30s: if the coordinator mistakenly throttled between these folders, this test would take
+        // over 30s to complete instead of the well-under-5s asserted below.
         var coordinator = new MetadataScrapeCoordinator(
             new FakeMetadataProviderFactory(provider), settings, db, new FakeArtworkService(),
             NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
@@ -560,7 +553,7 @@ public sealed class MetadataScrapeCoordinatorTests
         stopwatch.Stop();
 
         await Assert.That(provider.CallCount).IsEqualTo(0)
-            .Because("Both folders short-circuit from the scrape cache - no provider call, so no throttle applies.");
+            .Because("Both folders are turned away before a search - no provider call, so no throttle applies.");
         await Assert.That(stopwatch.Elapsed).IsLessThan(TimeSpan.FromSeconds(5));
     }
 
@@ -595,5 +588,242 @@ public sealed class MetadataScrapeCoordinatorTests
             .Because("The first folder's provider call must complete before the throttle delay before the second folder begins.");
         await Assert.That(stopwatch.Elapsed).IsLessThan(TimeSpan.FromSeconds(10))
             .Because("The delay honours the CancellationToken, so cancellation cuts it short instead of sitting out the full 30s.");
+    }
+
+    // ------------------------------------------------------------------
+    // The explicit library scan REFRESHES. The scrape cache records which title matched but not the
+    // poster's URL, so a scan that trusted it could never replace artwork it had already scraped -
+    // however small that artwork was. ScrapeFolderAsync, which nothing user-initiated calls, still
+    // trusts the cache (see ScrapeFolderAsync_CachedResult_ShortCircuitsWithoutCallingAProvider).
+    // ------------------------------------------------------------------
+
+    private static Task SeedCachedMatchAsync(DatabaseService db, string path, string synopsis) =>
+        db.SaveScrapeCacheAsync(new FolderScrapeCacheDto
+        {
+            Path = path,
+            Provider = "anilist",
+            ProviderId = "171018",
+            Synopsis = synopsis,
+            Year = 2024,
+            LastScraped = DateTimeOffset.UtcNow.AddDays(-30)
+        });
+
+    [Test]
+    public async Task ScrapeLibraryAsync_FolderWithACachedMatch_IsSearchedAgainAndItsPosterFetchedAgain()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        await db.SetFolderCustomTitleAsync(path, null);
+        await SeedCachedMatchAsync(db, path, "The synopsis from the first scan.");
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("171018", "Dan Da Dan", "A fresher synopsis.", 2024, "https://s4.anilist.co/extra-large.jpg")]);
+        var settings = new TestSettingsService { MetadataEnabled = true };
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), settings, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(1)
+            .Because("A folder scraped before is searched again; the cache does not stand in for the search.");
+        await Assert.That(artwork.SetScrapedPosterCallCount).IsEqualTo(1);
+        await Assert.That(artwork.LastFolderPath).IsEqualTo(path);
+        await Assert.That(artwork.LastPosterUrl).IsEqualTo("https://s4.anilist.co/extra-large.jpg");
+
+        FolderScrapeCacheDto? cache = await db.LoadScrapeCacheAsync(path);
+        await Assert.That(cache!.Synopsis).IsEqualTo("A fresher synopsis.");
+        await Assert.That(cache.LastScraped!.Value).IsGreaterThan(DateTimeOffset.UtcNow.AddMinutes(-5));
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_FolderWithACachedNoMatch_IsSearchedAgainAndNowMatches()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        await db.SetFolderCustomTitleAsync(path, null);
+        await db.SaveScrapeCacheAsync(new FolderScrapeCacheDto { Path = path, LastScraped = DateTimeOffset.UtcNow.AddDays(-30) });
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("171018", "Dan Da Dan", "synopsis", 2024, "https://s4.anilist.co/poster.jpg")]);
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        FolderScrapeCacheDto? cache = await db.LoadScrapeCacheAsync(path);
+        await Assert.That(cache!.ProviderId).IsEqualTo("171018");
+        await Assert.That(artwork.SetScrapedPosterCallCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_RefreshThatFindsNothing_KeepsTheEarlierCachedMatch()
+    {
+        // A provider reports an outage, a rate limit and "no such title" all as an empty result, so
+        // an empty answer must not turn what an earlier scan matched into a no-match.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        await db.SetFolderCustomTitleAsync(path, null);
+        await SeedCachedMatchAsync(db, path, "The synopsis from the first scan.");
+
+        var provider = new FakeMetadataProvider("anilist");
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(1);
+        FolderScrapeCacheDto? cache = await db.LoadScrapeCacheAsync(path);
+        await Assert.That(cache!.Provider).IsEqualTo("anilist");
+        await Assert.That(cache.ProviderId).IsEqualTo("171018");
+        await Assert.That(cache.Synopsis).IsEqualTo("The synopsis from the first scan.");
+        await Assert.That(artwork.SetScrapedPosterCallCount).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_CachedFolders_StillThrottleBetweenSearches()
+    {
+        // Refreshed folders reach a provider, so the throttle between folders applies to them: the
+        // first folder is searched, then the scan waits out the delay (cut short here by cancelling)
+        // before it starts the second.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        foreach (string path in new[] { @"D:\Anime\Dan Da Dan", @"D:\Anime\Frieren" })
+        {
+            await db.SetFolderCustomTitleAsync(path, null);
+            await SeedCachedMatchAsync(db, path, "synopsis");
+        }
+
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("1", "Match", null, null, null)]);
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db,
+            new FakeArtworkService(), NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        await Assert.That(async () => await coordinator.ScrapeLibraryAsync(null, cts.Token))
+            .Throws<OperationCanceledException>();
+        stopwatch.Stop();
+
+        await Assert.That(provider.CallCount).IsEqualTo(1)
+            .Because("The second folder is not searched until the throttle delay after the first has passed.");
+        await Assert.That(stopwatch.Elapsed).IsLessThan(TimeSpan.FromSeconds(10));
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_SpecialsFolderWithALeftoverCacheRow_IsStillSkippedEntirely()
+    {
+        // The cache used to shield a specials folder from the search by accident; with the cache no
+        // longer consulted by this scan, it is the specials rule alone that keeps it out.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string specialsPath = @"D:\Anime\Jujutsu Kaisen\NCOP & NCED";
+        const string seasonPath = @"D:\Anime\Jujutsu Kaisen\Season 1";
+        await db.SetFolderCustomTitleAsync(specialsPath, null);
+        await db.SetFolderCustomTitleAsync(seasonPath, null);
+        await SeedCachedMatchAsync(db, specialsPath, "a row an older build left behind");
+
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("1", "Jujutsu Kaisen", "synopsis", null, null)]);
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(1)
+            .Because("Only the season folder is searched.");
+        FolderScrapeCacheDto? specialsCache = await db.LoadScrapeCacheAsync(specialsPath);
+        await Assert.That(specialsCache!.Synopsis).IsEqualTo("a row an older build left behind");
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_SeasonFolderWithACachedMatch_IsSearchedViaItsParentAndGetsOnlyThePoster()
+    {
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Jujutsu Kaisen\Season 1";
+        await db.SetFolderCustomTitleAsync(path, null);
+        await SeedCachedMatchAsync(db, path, "synopsis");
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("1", "JUJUTSU KAISEN", "synopsis", 2020, "https://example.com/jjk.jpg")]);
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.LastQuery).IsEqualTo("Jujutsu Kaisen");
+        await Assert.That(artwork.LastFolderPath).IsEqualTo(path);
+        await Assert.That(artwork.LastPosterUrl).IsEqualTo("https://example.com/jjk.jpg");
+        FolderMetadataDto? metadata = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(metadata?.CustomTitle).IsNull()
+            .Because("The season folder keeps its own name; the series title is never written into it.");
+    }
+
+    [Test]
+    public async Task ScrapeLibraryAsync_RefreshNeverOverwritesAManualPosterOrCustomTitle()
+    {
+        // The Manual-poster guarantee, proven for the refreshing scan against the REAL artwork
+        // write path (as ScrapeFolderAsync_NeverOverwritesAManualPosterOrCustomTitle does for a first
+        // scrape). The folder IS searched again - the provider call count shows the scan really
+        // refreshed rather than skipping it - so it is the guard that holds the poster. The poster
+        // URL is a refused local port: should the guard ever fail, nothing leaves the machine.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        await db.SetFolderCustomTitleAsync(path, "My Custom Title");
+        await db.SetFolderPosterAsync(path, "manual-poster.jpg", PosterSource.Manual);
+        await SeedCachedMatchAsync(db, path, "synopsis");
+
+        var provider = new FakeMetadataProvider("anilist",
+            [new MetadataMatch("171018", "Dan Da Dan", "A different synopsis.", 2024, "https://127.0.0.1:9/scraped-poster.jpg")]);
+        var artworkService = new ArtworkService(db, NullLogger<ArtworkService>.Instance);
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artworkService,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeLibraryAsync(null, CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(1);
+        await Assert.That(artworkService.HasCreatedHttpClient).IsFalse()
+            .Because("A folder with a Manual poster must be refused before any download is attempted.");
+        FolderMetadataDto? persisted = await db.LoadFolderMetadataAsync(path);
+        await Assert.That(persisted!.CustomTitle).IsEqualTo("My Custom Title");
+        await Assert.That(persisted.PosterFile).IsEqualTo("manual-poster.jpg");
+        await Assert.That(persisted.PosterSource).IsEqualTo(PosterSource.Manual);
+    }
+
+    [Test]
+    public async Task ScrapeFolderAsync_CachedMatch_IsStillTrustedAndNotRefreshed()
+    {
+        // The refresh belongs to the explicit library scan alone. A single-folder scrape keeps its
+        // short-circuit, so nothing that merely looks a folder up ever costs a request.
+        using var fixture = new TestDirectoryFixture();
+        DatabaseService db = await CreateDatabaseAsync(fixture.DirectoryPath);
+        const string path = @"D:\Anime\Dan Da Dan";
+        await SeedCachedMatchAsync(db, path, "synopsis");
+
+        var provider = new FakeMetadataProvider("anilist", [new MetadataMatch("171018", "Dan Da Dan", null, 2024, "https://example.com/p.jpg")]);
+        var artwork = new FakeArtworkService();
+        var coordinator = new MetadataScrapeCoordinator(
+            new FakeMetadataProviderFactory(provider), new TestSettingsService { MetadataEnabled = true }, db, artwork,
+            NullLogger<MetadataScrapeCoordinator>.Instance, TimeSpan.Zero);
+
+        await coordinator.ScrapeFolderAsync(path, "Dan Da Dan", CancellationToken.None);
+
+        await Assert.That(provider.CallCount).IsEqualTo(0);
+        await Assert.That(artwork.SetScrapedPosterCallCount).IsEqualTo(0);
     }
 }
