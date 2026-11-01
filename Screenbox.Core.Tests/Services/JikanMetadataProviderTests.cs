@@ -156,7 +156,7 @@ public sealed class JikanMetadataProviderTests
         });
         JikanMetadataProvider provider = new(
             new HttpClient(handler),
-            requestTimeout: TimeSpan.FromMilliseconds(20));
+            requestTimeout: TimeSpan.FromMilliseconds(250));
 
         IReadOnlyList<MetadataMatch> matches = await provider.SearchAsync("query", CancellationToken.None);
 

@@ -152,7 +152,7 @@ public sealed class TmdbMetadataProviderTests
         TmdbMetadataProvider provider = new(
             new HttpClient(handler),
             FakeApiKey,
-            requestTimeout: TimeSpan.FromMilliseconds(20));
+            requestTimeout: TimeSpan.FromMilliseconds(250));
 
         IReadOnlyList<MetadataMatch> matches = await provider.SearchAsync("query", CancellationToken.None);
 
