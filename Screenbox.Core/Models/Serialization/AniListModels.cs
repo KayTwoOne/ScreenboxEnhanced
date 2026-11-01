@@ -87,6 +87,11 @@ public sealed class AniListFuzzyDate
 
 public sealed class AniListCoverImage
 {
+    /// <summary>The largest cover AniList serves; preferred over <see cref="Large"/> when present.</summary>
+    [JsonPropertyName("extraLarge")]
+    public string? ExtraLarge { get; set; }
+
+    /// <summary>The ~230x325 cover; the fallback for entries without an extra-large one.</summary>
     [JsonPropertyName("large")]
     public string? Large { get; set; }
 }

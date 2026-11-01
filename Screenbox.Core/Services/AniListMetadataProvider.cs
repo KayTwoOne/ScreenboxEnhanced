@@ -37,7 +37,7 @@ public sealed partial class AniListMetadataProvider : IMetadataProvider
               title { romaji english }
               description
               startDate { year }
-              coverImage { large }
+              coverImage { extraLarge large }
             }
           }
         }
@@ -139,7 +139,7 @@ public sealed partial class AniListMetadataProvider : IMetadataProvider
                     title!,
                     StripHtml(item.Description),
                     item.StartDate?.Year,
-                    item.CoverImage?.Large));
+                    PickCoverUrl(item.CoverImage)));
             }
 
             return matches;
@@ -161,6 +161,13 @@ public sealed partial class AniListMetadataProvider : IMetadataProvider
             return Array.Empty<MetadataMatch>();
         }
     }
+
+    /// <summary>
+    /// The best cover AniList offers: <c>extraLarge</c>, falling back to <c>large</c> (a 230x325
+    /// image, soft once shown whole on a card) when an entry has none or it is blank.
+    /// </summary>
+    private static string? PickCoverUrl(AniListCoverImage? cover) =>
+        !string.IsNullOrWhiteSpace(cover?.ExtraLarge) ? cover!.ExtraLarge : cover?.Large;
 
     private static string? StripHtml(string? html)
     {

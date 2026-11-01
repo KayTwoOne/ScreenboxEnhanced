@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Screenbox.Core.Models;
 using Screenbox.Core.Services;
@@ -31,7 +32,10 @@ public sealed class AniListMetadataProviderTests
                       "title": { "romaji": "Shingeki no Kyojin", "english": "Attack on Titan" },
                       "description": "Robots &amp; Humans fight.<br><br>(Source: Test)",
                       "startDate": { "year": 2013 },
-                      "coverImage": { "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922.jpg" }
+                      "coverImage": {
+                        "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-extra.jpg",
+                        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922.jpg"
+                      }
                     }
                   ]
                 }
@@ -49,8 +53,55 @@ public sealed class AniListMetadataProviderTests
         await Assert.That(match.Title).IsEqualTo("Attack on Titan");
         await Assert.That(match.Synopsis).IsEqualTo("Robots & Humans fight.(Source: Test)");
         await Assert.That(match.Year).IsEqualTo(2013);
-        await Assert.That(match.PosterUrl).IsEqualTo("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922.jpg");
+        await Assert.That(match.PosterUrl).IsEqualTo("https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-extra.jpg")
+            .Because("The extra-large cover is preferred over the large one when AniList serves both.");
         await Assert.That(handler.CallCount).IsEqualTo(1);
+    }
+
+    [Test]
+    [Arguments("""{ "extraLarge": null, "large": "https://s4.anilist.co/large.jpg" }""")]
+    [Arguments("""{ "large": "https://s4.anilist.co/large.jpg" }""")]
+    [Arguments("""{ "extraLarge": "  ", "large": "https://s4.anilist.co/large.jpg" }""")]
+    public async Task SearchAsync_NoUsableExtraLargeCover_FallsBackToTheLargeOne(string coverImage)
+    {
+        string body = $$"""
+            {
+              "data": { "Page": { "media": [
+                {
+                  "id": 5,
+                  "title": { "romaji": "Cowboy Bebop", "english": null },
+                  "coverImage": {{coverImage}}
+                }
+              ] } }
+            }
+            """;
+        AniListMetadataProvider provider = new(new HttpClient(new StubHttpMessageHandler(HttpStatusCode.OK, body)));
+
+        IReadOnlyList<MetadataMatch> matches = await provider.SearchAsync("Cowboy Bebop", CancellationToken.None);
+
+        await Assert.That(matches).Count().IsEqualTo(1);
+        await Assert.That(matches[0].PosterUrl).IsEqualTo("https://s4.anilist.co/large.jpg");
+    }
+
+    [Test]
+    public async Task SearchAsync_ExtraLargeOnly_UsesIt()
+    {
+        const string body = """
+            {
+              "data": { "Page": { "media": [
+                {
+                  "id": 6,
+                  "title": { "romaji": "Cowboy Bebop", "english": null },
+                  "coverImage": { "extraLarge": "https://s4.anilist.co/extra.jpg", "large": null }
+                }
+              ] } }
+            }
+            """;
+        AniListMetadataProvider provider = new(new HttpClient(new StubHttpMessageHandler(HttpStatusCode.OK, body)));
+
+        IReadOnlyList<MetadataMatch> matches = await provider.SearchAsync("Cowboy Bebop", CancellationToken.None);
+
+        await Assert.That(matches[0].PosterUrl).IsEqualTo("https://s4.anilist.co/extra.jpg");
     }
 
     [Test]
@@ -66,7 +117,7 @@ public sealed class AniListMetadataProviderTests
                       "title": { "romaji": "Only Romaji Title", "english": null },
                       "description": null,
                       "startDate": { "year": null },
-                      "coverImage": { "large": null }
+                      "coverImage": { "extraLarge": null, "large": null }
                     }
                   ]
                 }
@@ -138,7 +189,7 @@ public sealed class AniListMetadataProviderTests
                       "title": { "romaji": "Should Not Appear", "english": null },
                       "description": null,
                       "startDate": { "year": null },
-                      "coverImage": { "large": null }
+                      "coverImage": { "extraLarge": null, "large": null }
                     }
                   ]
                 }
@@ -183,6 +234,10 @@ public sealed class AniListMetadataProviderTests
         await Assert.That(handler.LastRequestBody!).Contains("Cowboy Bebop");
         await Assert.That(handler.LastRequestBody!).Contains("ANIME");
         await Assert.That(handler.CallCount).IsEqualTo(1);
+
+        // The extra-large cover is only ever returned if the query asks for it, and the large one
+        // stays as the fallback. The stubbed response above would satisfy any query.
+        await Assert.That(Regex.IsMatch(handler.LastRequestBody!, @"coverImage\s*\{[^}]*extraLarge[^}]*large[^}]*\}")).IsTrue();
     }
 
     [Test]
