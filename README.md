@@ -65,7 +65,12 @@ Turn on online metadata in Settings to fetch posters from AniList, Jikan (an uno
 
 ## Install
 
-Screenbox Enhanced is not on the Microsoft Store. Build it from source as described below. A sideload package is also attached to each run of the repository's build workflow.
+Screenbox Enhanced is not on the Microsoft Store. Install it from the [latest release](https://github.com/KayTwoOne/ScreenboxEnhanced/releases/latest) instead:
+
+1. Under **Assets**, download the `.zip` file and extract it.
+2. Right-click `Install.ps1` and choose **Run with PowerShell**. The first time, it asks to trust the Screenbox Enhanced signing certificate (this needs administrator approval), then installs the app.
+
+The package is signed with this project's own certificate rather than one from a certificate authority, so Windows has to be told to trust it once. You can also build the app from source, as described below.
 
 ## Contribute
 
