@@ -289,6 +289,10 @@ public sealed class VlcMediaPlayer : IMediaPlayer
     private ChapterCue? _chapter;
     private Rect _normalizedSourceRect;
     private bool _readyToPlay;
+
+    // Per thread: VLC reports a selection on its own thread, and a choice the user makes on the UI
+    // thread at the same moment must still reach VLC.
+    [ThreadStatic] private static bool t_isFollowingVlcSelection;
     private bool _updateMediaProperties;
     private TimeSpan _naturalDuration;
     private TimeSpan _position;
@@ -355,7 +359,16 @@ public sealed class VlcMediaPlayer : IMediaPlayer
         // Update subtitle track index accordingly.
         int spu = e.Id;
         if (spu < 0) return;
-        PlaybackItem.SubtitleTracks.SelectVlcSpu(spu);
+
+        t_isFollowingVlcSelection = true;
+        try
+        {
+            PlaybackItem.SubtitleTracks.SelectVlcSpu(spu);
+        }
+        finally
+        {
+            t_isFollowingVlcSelection = false;
+        }
     }
 
     private void VlcPlayer_ChapterChanged(object? sender, MediaPlayerChapterChangedEventArgs e)
@@ -471,6 +484,11 @@ public sealed class VlcMediaPlayer : IMediaPlayer
 
     private void SubtitleTracksOnSelectedIndexChanged(ISingleSelectMediaTrackList sender, object? args)
     {
+        // VLC already has this selection. Asking for it again raises another ESSelected, and two
+        // selections in flight at once (a saved language and a file's default track, say) then
+        // chase each other forever, restarting subtitle decoders until the video freezes.
+        if (t_isFollowingVlcSelection) return;
+
         PlaybackSubtitleTrackList trackList = (PlaybackSubtitleTrackList)sender;
         if (sender.SelectedIndex < 0) VlcPlayer.SetSpu(-1);
         else if (trackList[sender.SelectedIndex].VlcSpu >= 0)   // VlcSpu < 0 on lazy load
