@@ -26,6 +26,17 @@ public sealed class SubtitleScaleRangeTests
     }
 
     [Test]
+    [Arguments(150d, 150)]
+    [Arguments(149.6, 150)]
+    [Arguments(150.4, 150)]
+    [Arguments(10d, 50)]
+    [Arguments(900d, 250)]
+    public async Task FromSlider_RoundsAndClamps(double value, int expected)
+    {
+        await Assert.That(SubtitleScaleRange.FromSlider(value)).IsEqualTo(expected);
+    }
+
+    [Test]
     public async Task TestSettingsService_ClampsLikeTheRealService()
     {
         TestSettingsService settings = new() { SubtitleScale = 400 };

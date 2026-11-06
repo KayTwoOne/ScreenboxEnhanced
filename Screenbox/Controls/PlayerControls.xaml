@@ -97,6 +97,21 @@
                         StepFrequency="50"
                         Value="{Binding SubtitleTimingOffset, Mode=TwoWay}" />
                     <TextBlock HorizontalAlignment="Center"><Run Text="{Binding ElementName=SubtitleTimingOffsetSlider, Path=Value, FallbackValue=0}" /> <Run Text="ms" /></TextBlock>
+                    <Slider
+                        x:Name="SubtitleSizeSlider"
+                        Header="{strings:Resources Key=SubtitleSizeSliderHeader}"
+                        IsThumbToolTipEnabled="False"
+                        Maximum="250"
+                        Minimum="50"
+                        SmallChange="10"
+                        StepFrequency="10"
+                        Value="{Binding SubtitleScale, Mode=TwoWay}" />
+                    <TextBlock HorizontalAlignment="Center"><Run Text="{Binding ElementName=SubtitleSizeSlider, Path=Value, FallbackValue=100}" /><Run Text="%" /></TextBlock>
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{strings:Resources Key=SubtitleSizeCaption}"
+                        TextWrapping="WrapWholeWords" />
                 </StackPanel>
             </Flyout>
 

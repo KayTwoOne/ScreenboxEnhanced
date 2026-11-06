@@ -19,4 +19,7 @@ public static class SubtitleScaleRange
 
     /// <summary>Limits a value to the supported range.</summary>
     public static int Clamp(int value) => Math.Clamp(value, Minimum, Maximum);
+
+    /// <summary>Converts a slider's value to a setting value.</summary>
+    public static int FromSlider(double value) => Clamp((int)Math.Round(value));
 }

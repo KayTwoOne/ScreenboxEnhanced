@@ -477,6 +477,27 @@
 
                 <ctc:SettingsCard
                     Margin="{StaticResource SettingsCardMargin}"
+                    Description="{x:Bind strings:Resources.SubtitleSizeCaption}"
+                    Header="{x:Bind strings:Resources.SettingsSubtitleSizeHeader}"
+                    HeaderIcon="{ui:FontIcon Glyph=&#xED1E;}">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock VerticalAlignment="Center"><Run Text="{x:Bind ViewModel.SubtitleScale, Mode=OneWay}" /><Run Text="%" /></TextBlock>
+                        <Slider
+                            Width="200"
+                            VerticalAlignment="Center"
+                            AutomationProperties.HelpText="{x:Bind strings:Resources.SubtitleSizeCaption}"
+                            AutomationProperties.Name="{x:Bind strings:Resources.SettingsSubtitleSizeHeader}"
+                            IsThumbToolTipEnabled="False"
+                            Maximum="250"
+                            Minimum="50"
+                            SmallChange="10"
+                            StepFrequency="10"
+                            Value="{x:Bind ViewModel.SubtitleScale, Mode=TwoWay}" />
+                    </StackPanel>
+                </ctc:SettingsCard>
+
+                <ctc:SettingsCard
+                    Margin="{StaticResource SettingsCardMargin}"
                     Description="{x:Bind strings:Resources.SettingsRewindDescription}"
                     Header="{x:Bind strings:Resources.Rewind}"
                     HeaderIcon="{ui:FontIcon Glyph=&#xED3C;}">

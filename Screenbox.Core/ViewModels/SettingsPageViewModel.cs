@@ -24,7 +24,8 @@ using Windows.System;
 
 namespace Screenbox.Core.ViewModels;
 
-public sealed partial class SettingsPageViewModel : ObservableRecipient
+public sealed partial class SettingsPageViewModel : ObservableRecipient,
+    IRecipient<SettingsChangedMessage>
 {
     [ObservableProperty] public partial int PlayerAutoResize { get; set; }
     [ObservableProperty] public partial int PlayerRewindStep { get; set; }
@@ -41,6 +42,12 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     [ObservableProperty] public partial bool PlayerShowChapters { get; set; }
     [ObservableProperty] public partial int PlayerControlsHideDelay { get; set; }
     [ObservableProperty] public partial int VolumeBoost { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subtitle size as a percentage. It is a double because it binds to a slider.
+    /// </summary>
+    [ObservableProperty] public partial double SubtitleScale { get; set; }
+
     [ObservableProperty] public partial bool UseIndexer { get; set; }
     [ObservableProperty] public partial bool ShowRecent { get; set; }
     [ObservableProperty] public partial int Theme { get; set; }
@@ -151,6 +158,8 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
             _portableStorageDeviceWatcher.Start();
         }
 
+        Messenger.Register<SettingsChangedMessage>(this);
+
         // Load values
         PlayerAutoResize = (int)_settingsService.PlayerAutoResize;
         PlayerRewindStep = _settingsService.PlayerRewindStep;
@@ -166,6 +175,7 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
         PlayerShowControls = _settingsService.PlayerShowControls;
         PlayerShowChapters = _settingsService.PlayerShowChapters;
         PlayerControlsHideDelay = _settingsService.PlayerControlsHideDelay;
+        SubtitleScale = _settingsService.SubtitleScale;
         UseIndexer = _settingsService.UseIndexer;
         ShowRecent = _settingsService.ShowRecent;
         PersistPlaybackPosition = _settingsService.PersistPlaybackPosition;
@@ -226,6 +236,25 @@ public sealed partial class SettingsPageViewModel : ObservableRecipient
     {
         _settingsService.PlayerAutoResize = (PlayerAutoResizeOption)value;
         Messenger.Send(new SettingsChangedMessage(nameof(PlayerAutoResize), typeof(SettingsPageViewModel)));
+    }
+
+    /// <summary>Follows a change made with the player's slider while this page is open.</summary>
+    public void Receive(SettingsChangedMessage message)
+    {
+        if (message.SettingsName == nameof(ISettingsService.SubtitleScale))
+        {
+            SubtitleScale = _settingsService.SubtitleScale;
+        }
+    }
+
+    partial void OnSubtitleScaleChanged(double value)
+    {
+        // The setting already holds this value when it is being loaded or followed from elsewhere.
+        int scale = SubtitleScaleRange.FromSlider(value);
+        if (_settingsService.SubtitleScale == scale) return;
+
+        _settingsService.SubtitleScale = scale;
+        Messenger.Send(new SettingsChangedMessage(nameof(ISettingsService.SubtitleScale), typeof(SettingsPageViewModel)));
     }
 
     partial void OnPlayerRewindStepChanged(int value)
