@@ -131,7 +131,13 @@ public sealed partial class SubtitleResizeCoordinator : ObservableRecipient, ISu
     }
 
     /// <summary>Handles playback starting or resuming, which is when a track can first be added.</summary>
-    internal void OnPlaybackResumed() => ScheduleApply(TimeSpan.Zero);
+    internal void OnPlaybackResumed()
+    {
+        // An update still running will finish the job. Starting over would throw away a read of a
+        // large file, which takes long enough on a hard drive for a pause to land in the middle.
+        if (!PendingUpdate.IsCompleted) return;
+        ScheduleApply(TimeSpan.Zero);
+    }
 
     /// <summary>Handles the input restarting, which drops its slaves. Playing again will re-apply.</summary>
     internal void OnInputRestarted() => ResetAfterInputEnded();
@@ -208,7 +214,10 @@ public sealed partial class SubtitleResizeCoordinator : ObservableRecipient, ISu
         }
 
         await StartupCleanup;
-        string mrl = await _store.WriteAsync(ResizedAssBuilder.Render(subtitle, scale), cancellationToken);
+
+        // A long track renders to a large string, which is too much to allocate on the UI thread.
+        string content = await Task.Run(() => ResizedAssBuilder.Render(subtitle, scale), cancellationToken);
+        string mrl = await _store.WriteAsync(content, cancellationToken);
         _generatedMrls.Add(mrl);
         cancellationToken.ThrowIfCancellationRequested();
 

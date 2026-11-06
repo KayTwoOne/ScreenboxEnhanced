@@ -436,6 +436,30 @@ public sealed class SubtitleResizeCoordinatorTests
     }
 
     [Test]
+    public async Task PlaybackResumingDuringARead_DoesNotStartTheReadAgain()
+    {
+        // Reading a large file takes a while on a hard drive, so a pause or a resume in the middle
+        // of it must not throw that work away.
+        TestSettingsService settings = new() { SubtitleScale = 150 };
+        FakeStore store = new();
+        TaskCompletionSource gate = new();
+        FakeTarget target = Target();
+        target.OpenGate = gate.Task;
+        SubtitleResizeCoordinator coordinator = Coordinator(settings, store);
+
+        coordinator.AttachTarget(target);
+        Task reading = coordinator.PendingUpdate;
+        coordinator.OnPlaybackResumed();
+        coordinator.OnPlaybackResumed();
+        gate.SetResult();
+        await reading;
+        await coordinator.PendingUpdate;
+
+        await Assert.That(target.OpenCount).IsEqualTo(1);
+        await Assert.That(target.ShownResized.Count).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task PlaybackResuming_DoesNotAddTheSameFileAgain()
     {
         TestSettingsService settings = new() { SubtitleScale = 150 };
