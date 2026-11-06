@@ -63,6 +63,7 @@ public sealed partial class CompositeTrackPickerViewModel : ObservableRecipient,
     private readonly PlayerContext _playerContext;
     private readonly ILogger<CompositeTrackPickerViewModel> _logger;
     private bool _flyoutOpened;
+    private bool _isRebuildingTrackLists;
     private CancellationTokenSource? _cts;
 
     public CompositeTrackPickerViewModel(PlayerContext playerContext, IFilesService filesService,
@@ -232,11 +233,10 @@ public sealed partial class CompositeTrackPickerViewModel : ObservableRecipient,
 
     partial void OnSubtitleTrackIndexChanged(int value)
     {
-        if (ItemSubtitleTrackList == null) return;
+        if (ItemSubtitleTrackList == null || _isRebuildingTrackLists) return;
 
         // VM index 0 maps to actual track index -1, which is "Disable"
-        // Decrement value by 1 to convert from display index to actual subtitle track index
-        value = Math.Max(-1, value - 1);
+        if (!SubtitlePickerRow.TryGetTrackIndex(value, out value)) return;
         if (value >= ItemSubtitleTrackList.Count) return;
         ItemSubtitleTrackList.SelectedIndex = value;
 
@@ -256,13 +256,13 @@ public sealed partial class CompositeTrackPickerViewModel : ObservableRecipient,
 
     partial void OnAudioTrackIndexChanged(int value)
     {
-        if (ItemAudioTrackList != null && value >= 0 && value < ItemAudioTrackList.Count)
+        if (ItemAudioTrackList != null && !_isRebuildingTrackLists && value >= 0 && value < ItemAudioTrackList.Count)
             ItemAudioTrackList.SelectedIndex = value;
     }
 
     partial void OnVideoTrackIndexChanged(int value)
     {
-        if (ItemVideoTrackList != null && value >= 0 && value < ItemVideoTrackList.Count)
+        if (ItemVideoTrackList != null && !_isRebuildingTrackLists && value >= 0 && value < ItemVideoTrackList.Count)
             ItemVideoTrackList.SelectedIndex = value;
     }
 
@@ -290,9 +290,14 @@ public sealed partial class CompositeTrackPickerViewModel : ObservableRecipient,
 
     public void OnFlyoutOpening()
     {
+        // Replacing the rows can move or clear the ListView's selection, which is not the user
+        // choosing a track. The indexes are set from the playing item straight afterwards.
+        _isRebuildingTrackLists = true;
         UpdateSubtitleTrackList();
         UpdateAudioTrackList();
         UpdateVideoTrackList();
+        _isRebuildingTrackLists = false;
+
         SubtitleTrackIndex = (ItemSubtitleTrackList?.SelectedIndex + 1) ?? 0;
         AudioTrackIndex = ItemAudioTrackList?.SelectedIndex ?? -1;
         VideoTrackIndex = ItemVideoTrackList?.SelectedIndex ?? -1;

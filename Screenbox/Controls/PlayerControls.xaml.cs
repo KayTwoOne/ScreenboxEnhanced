@@ -41,6 +41,8 @@ public sealed partial class PlayerControls : UserControl
     internal CommonViewModel Common { get; }
 
     private Flyout? _castFlyout;
+    private Flyout? _subtitleOptionsFlyout;
+    private Flyout? _audioOptionsFlyout;
 
     public PlayerControls()
     {
@@ -51,20 +53,18 @@ public sealed partial class PlayerControls : UserControl
         AudioTrackSubtitlePicker.ShowAudioOptionsCommand = new RelayCommand(ShowAudioOptions);
     }
 
-    [DynamicWindowsRuntimeCast(typeof(Flyout))]
     private void ShowSubtitleOptions()
     {
         AudioSubtitlePickerFlyout.Hide();
-        Flyout flyout = (Flyout)Resources["SubtitleOptionsFlyout"];
-        flyout.ShowAt(AudioAndCaptionButton);
+        _subtitleOptionsFlyout ??= new Flyout { Content = new SubtitleOptionsPanel { ViewModel = ViewModel } };
+        _subtitleOptionsFlyout.ShowAt(AudioAndCaptionButton);
     }
 
-    [DynamicWindowsRuntimeCast(typeof(Flyout))]
     private void ShowAudioOptions()
     {
         AudioSubtitlePickerFlyout.Hide();
-        Flyout flyout = (Flyout)Resources["AudioOptionsFlyout"];
-        flyout.ShowAt(AudioAndCaptionButton);
+        _audioOptionsFlyout ??= new Flyout { Content = new AudioOptionsPanel { ViewModel = ViewModel } };
+        _audioOptionsFlyout.ShowAt(AudioAndCaptionButton);
     }
 
     public void FocusFirstButton(FocusState value = FocusState.Programmatic)

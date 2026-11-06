@@ -44,6 +44,12 @@ Give any folder a display name and poster of your choosing, and remove a custom 
 
 ![Screenshot of the Edit folder dialog with an image link pasted in and a preview of the poster it fetched.](/assets/images/docs/PC-EditFolder-Dark.png)
 
+### Subtitle size
+
+Make subtitles larger or smaller, from 50% to 250%, while a video plays. Use the size control under Options in the subtitle menu, or in Settings. It works on SRT and ASS subtitles inside MKV files. In ASS subtitles only the dialogue changes size, so signs and song lyrics stay where the file put them. Image subtitles such as PGS can't be resized.
+
+The first size change on a file reads its subtitle track, which can take up to a minute for a large film on a hard drive. The video keeps playing at the original subtitle size until then.
+
 ### Optional online posters
 
 Turn on online metadata in Settings to fetch posters from AniList, Jikan (an unofficial MyAnimeList API) and TMDB, using your own TMDB key. It is off by default and sends nothing until you switch it on. Only a cleaned-up folder name is sent, and your folder names are never changed. See the [privacy policy](PRIVACY.md).

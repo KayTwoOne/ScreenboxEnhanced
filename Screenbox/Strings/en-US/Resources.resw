@@ -845,6 +845,15 @@
   <data name="TimingOffset" xml:space="preserve">
     <value>Timing offset</value>
   </data>
+  <data name="SubtitleSizeSliderHeader" xml:space="preserve">
+    <value>Size</value>
+  </data>
+  <data name="SubtitleSizeCaption" xml:space="preserve">
+    <value>Applies to text subtitles (SRT, ASS)</value>
+  </data>
+  <data name="SettingsSubtitleSizeHeader" xml:space="preserve">
+    <value>Subtitle size</value>
+  </data>
   <data name="PropertyComposers" xml:space="preserve">
     <value>Composers</value>
   </data>

@@ -1,0 +1,39 @@
+<UserControl
+    x:Class="Screenbox.Controls.SubtitleOptionsPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:strings="using:Screenbox.Strings">
+
+    <StackPanel
+        Width="220"
+        FlowDirection="LeftToRight"
+        Orientation="Vertical"
+        Spacing="8">
+        <Slider
+            AutomationProperties.Name="{x:Bind strings:Resources.TimingOffset}"
+            Header="{x:Bind strings:Resources.TimingOffset}"
+            IsThumbToolTipEnabled="False"
+            Maximum="3000"
+            Minimum="-3000"
+            SmallChange="25"
+            StepFrequency="50"
+            Value="{x:Bind ViewModel.SubtitleTimingOffset, Mode=TwoWay}" />
+        <TextBlock HorizontalAlignment="Center"><Run Text="{x:Bind ViewModel.SubtitleTimingOffset, Mode=OneWay}" /> <Run Text="ms" /></TextBlock>
+        <Slider
+            AutomationProperties.HelpText="{x:Bind strings:Resources.SubtitleSizeCaption}"
+            AutomationProperties.Name="{x:Bind strings:Resources.SettingsSubtitleSizeHeader}"
+            Header="{x:Bind strings:Resources.SubtitleSizeSliderHeader}"
+            IsThumbToolTipEnabled="False"
+            Maximum="250"
+            Minimum="50"
+            SmallChange="10"
+            StepFrequency="10"
+            Value="{x:Bind ViewModel.SubtitleScale, Mode=TwoWay}" />
+        <TextBlock HorizontalAlignment="Center"><Run Text="{x:Bind ViewModel.SubtitleScale, Mode=OneWay}" /><Run Text="%" /></TextBlock>
+        <TextBlock
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Text="{x:Bind strings:Resources.SubtitleSizeCaption}"
+            TextWrapping="WrapWholeWords" />
+    </StackPanel>
+</UserControl>

@@ -48,6 +48,12 @@ public sealed partial class PlayerControlsViewModel : ObservableRecipient,
     [ObservableProperty] public partial double PlaybackRate { get; set; }
     [ObservableProperty] public partial double AudioTimingOffset { get; set; }
     [ObservableProperty] public partial double SubtitleTimingOffset { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subtitle size as a percentage. It is a double because it binds to a slider.
+    /// </summary>
+    [ObservableProperty] public partial double SubtitleScale { get; set; }
+
     [ObservableProperty] public partial bool IsAdvancedModeActive { get; set; }
     [ObservableProperty] public partial bool IsMinimal { get; set; }
     [ObservableProperty] public partial bool PlayerShowChapters { get; set; }
@@ -97,6 +103,7 @@ public sealed partial class PlayerControlsViewModel : ObservableRecipient,
         IsMinimal = true;
         IsDisplayingRemainingTime = settingsService.PersistentShowRemainingTime;
         PlayerShowChapters = settingsService.PlayerShowChapters;
+        SubtitleScale = settingsService.SubtitleScale;
         PlayQueue = playQueue;
         PlayQueue.PropertyChanged += PlayQueueOnPropertyChanged;
         _coordinator.CanNavigateChanged += OnCoordinatorCanNavigateChanged;
@@ -124,6 +131,9 @@ public sealed partial class PlayerControlsViewModel : ObservableRecipient,
                 break;
             case nameof(SettingsPageViewModel.PlayerShowChapters):
                 PlayerShowChapters = _settingsService.PlayerShowChapters;
+                break;
+            case nameof(ISettingsService.SubtitleScale):
+                SubtitleScale = _settingsService.SubtitleScale;
                 break;
         }
     }
@@ -255,6 +265,16 @@ public sealed partial class PlayerControlsViewModel : ObservableRecipient,
         {
             vlcMediaPlayer.SubtitleDelay = value;
         }
+    }
+
+    partial void OnSubtitleScaleChanged(double value)
+    {
+        // The setting already holds this value when it is being loaded or followed from elsewhere.
+        int scale = SubtitleScaleRange.FromSlider(value);
+        if (_settingsService.SubtitleScale == scale) return;
+
+        _settingsService.SubtitleScale = scale;
+        Messenger.Send(new SettingsChangedMessage(nameof(ISettingsService.SubtitleScale), typeof(PlayerControlsViewModel)));
     }
 
     private void PlayQueueOnPropertyChanged(object? sender, PropertyChangedEventArgs e)

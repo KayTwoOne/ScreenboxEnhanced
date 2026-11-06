@@ -48,6 +48,7 @@ public sealed class SettingsService : ISettingsService
     private const string PlayerGestureSlideHorizontalKey = "Player/Gesture/SlideHorizontal";
     private const string PlayerGesturePressAndHoldKey = "Player/Gesture/PressAndHold";
     private const string PlayerWatchedThresholdPercentKey = "Player/WatchedThresholdPercent";
+    private const string PlayerSubtitleScaleKey = "Player/SubtitleScale";
     private const string MetadataEnabledKey = "Metadata/Enabled";
     private const string MetadataUseAniListKey = "Metadata/UseAniList";
     private const string MetadataUseJikanKey = "Metadata/UseJikan";
@@ -264,6 +265,13 @@ public sealed class SettingsService : ISettingsService
         set => SetValue(PlayerWatchedThresholdPercentKey, value);
     }
 
+    public int SubtitleScale
+    {
+        // Clamped on the way out as well, in case the stored value came from elsewhere.
+        get => SubtitleScaleRange.Clamp(GetValue<int>(PlayerSubtitleScaleKey));
+        set => SetValue(PlayerSubtitleScaleKey, SubtitleScaleRange.Clamp(value));
+    }
+
     public bool MetadataEnabled
     {
         get => GetValue<bool>(MetadataEnabledKey);
@@ -326,6 +334,7 @@ public sealed class SettingsService : ISettingsService
         SetDefault(PlayerGestureSlideHorizontalKey, true);
         SetDefault(PlayerGesturePressAndHoldKey, true);
         SetDefault(PlayerWatchedThresholdPercentKey, WatchThreshold.DefaultPercent);
+        SetDefault(PlayerSubtitleScaleKey, SubtitleScaleRange.Default);
         SetDefault(MetadataEnabledKey, false);        // the opt-in guarantee, in one line
         SetDefault(MetadataUseAniListKey, false);
         SetDefault(MetadataUseJikanKey, false);

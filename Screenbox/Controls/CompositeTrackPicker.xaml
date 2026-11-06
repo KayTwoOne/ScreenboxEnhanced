@@ -73,8 +73,7 @@
                         Grid.Column="1"
                         Padding="{StaticResource HyperlinkButtonUniformPadding}"
                         contract14Present:AutomationProperties.AutomationControlType="Button"
-                        Command="{x:Bind ShowAudioOptionsCommand}"
-                        IsEnabled="False">
+                        Command="{x:Bind ShowAudioOptionsCommand}">
                         <TextBlock
                             Style="{StaticResource CaptionTextBlockStyle}"
                             Text="{x:Bind strings:Resources.Options}"
@@ -130,8 +129,7 @@
                         Grid.Column="1"
                         Padding="{StaticResource HyperlinkButtonUniformPadding}"
                         contract14Present:AutomationProperties.AutomationControlType="Button"
-                        Command="{x:Bind ShowSubtitleOptionsCommand}"
-                        IsEnabled="False">
+                        Command="{x:Bind ShowSubtitleOptionsCommand}">
                         <TextBlock
                             Style="{StaticResource CaptionTextBlockStyle}"
                             Text="{x:Bind strings:Resources.Options}"
