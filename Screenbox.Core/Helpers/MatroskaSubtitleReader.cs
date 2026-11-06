@@ -78,16 +78,6 @@ public static class MatroskaSubtitleReader
     }
 
     /// <summary>
-    /// Returns whether a Matroska CodecID is one of the text formats the subtitle resizer supports:
-    /// ASS and SSA under either of their two ids, and SRT (<c>S_TEXT/UTF8</c>).
-    /// </summary>
-    public static bool IsSupportedCodec(string codecId) => codecId switch
-    {
-        "S_TEXT/ASS" or "S_TEXT/SSA" or "S_ASS" or "S_SSA" or "S_TEXT/UTF8" => true,
-        _ => false,
-    };
-
-    /// <summary>
     /// One pass over the file. Keeps what it has read in fields, so that when the file turns out
     /// to be truncated or corrupt the caller still gets everything that came before the damage.
     /// </summary>

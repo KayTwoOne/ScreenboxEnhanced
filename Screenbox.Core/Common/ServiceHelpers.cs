@@ -68,6 +68,7 @@ public static class ServiceHelpers
         services.AddSingleton<IPlayQueueCoordinator, PlayQueueCoordinator>();
         services.AddSingleton<IPlaybackProgressTracker, PlaybackProgressTracker>();
         services.AddSingleton<IMetadataScrapeCoordinator, MetadataScrapeCoordinator>();
+        services.AddSingleton<ISubtitleResizeCoordinator, SubtitleResizeCoordinator>();
 
         // Services
         services.AddSingleton<IDatabaseService, DatabaseService>();
@@ -84,6 +85,7 @@ public static class ServiceHelpers
         services.AddSingleton<IPlaylistService, PlaylistService>();
         services.AddSingleton<IWatchStateService, WatchStateService>();
         services.AddSingleton<IFolderStatsService, FolderStatsService>();
+        services.AddSingleton<IResizedSubtitleStore, ResizedSubtitleStore>();
 
         // Metadata scraping is opt-in and off by default. Only the factory and the coordinator are
         // registered here - never an HttpClient or a provider - so nothing network-capable is

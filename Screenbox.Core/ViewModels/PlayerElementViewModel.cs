@@ -9,6 +9,7 @@ using CommunityToolkit.WinUI;
 using LibVLCSharp.Shared;
 using Microsoft.Extensions.Logging;
 using Screenbox.Core.Contexts;
+using Screenbox.Core.Coordinators;
 using Screenbox.Core.Enums;
 using Screenbox.Core.Events;
 using Screenbox.Core.Helpers;
@@ -82,8 +83,13 @@ public sealed partial class PlayerElementViewModel : ObservableRecipient,
         IPlayerService playerService,
         ISettingsService settingsService,
         ISystemMediaTransportControlsService transportControlsService,
+        ISubtitleResizeCoordinator subtitleResizeCoordinator,
         ILogger<PlayerElementViewModel> logger)
     {
+        // Nothing calls the resizer directly, and a singleton only exists once something asks for it.
+        // Asking here means it is listening before the first player is created, on the UI thread.
+        _ = subtitleResizeCoordinator;
+
         _playerContext = playerContext;
         _playerService = playerService;
         _settingsService = settingsService;

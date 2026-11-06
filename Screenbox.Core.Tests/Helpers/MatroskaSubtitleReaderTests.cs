@@ -382,19 +382,4 @@ public sealed class MatroskaSubtitleReaderTests
 
         await Assert.That(() => MatroskaSubtitleReader.ReadTrack(stream, 2, cts.Token)).Throws<OperationCanceledException>();
     }
-
-    [Test]
-    [Arguments("S_TEXT/ASS", true)]
-    [Arguments("S_TEXT/SSA", true)]
-    [Arguments("S_ASS", true)]
-    [Arguments("S_SSA", true)]
-    [Arguments("S_TEXT/UTF8", true)]
-    [Arguments("S_HDMV/PGS", false)]
-    [Arguments("S_VOBSUB", false)]
-    [Arguments("S_TEXT/WEBVTT", false)]
-    [Arguments("", false)]
-    public async Task IsSupportedCodec_AcceptsOnlyAssSsaAndSrt(string codecId, bool expected)
-    {
-        await Assert.That(MatroskaSubtitleReader.IsSupportedCodec(codecId)).IsEqualTo(expected);
-    }
 }
