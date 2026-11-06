@@ -42,6 +42,11 @@ public class TestSettingsService : ISettingsService
     public SongSortOrder PersistentSongsSortOrder { get; set; } = SongSortOrder.Title;
     public AlbumSortOrder PersistentAlbumsSortOrder { get; set; } = AlbumSortOrder.Title;
     public double WatchedThresholdPercent { get; set; } = WatchThreshold.DefaultPercent;
+    public int SubtitleScale
+    {
+        get;
+        set => field = SubtitleScaleRange.Clamp(value);
+    } = SubtitleScaleRange.Default;
     public bool MetadataEnabled { get; set; }
     public bool MetadataUseAniList { get; set; }
     public bool MetadataUseJikan { get; set; }

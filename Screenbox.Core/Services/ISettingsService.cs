@@ -24,6 +24,17 @@ public interface ISettingsService
     int PlayerControlsHideDelay { get; set; }
     int PersistentVolume { get; set; }
     string PersistentSubtitleLanguage { get; set; }
+
+    /// <summary>
+    /// Gets or sets the size of text subtitles, as a percentage of their original size.
+    /// Applies to every video and can be changed while one is playing.
+    /// </summary>
+    /// <value>
+    /// A value from <see cref="SubtitleScaleRange.Minimum"/> to <see cref="SubtitleScaleRange.Maximum"/>;
+    /// values outside that range are clamped. The default is <see cref="SubtitleScaleRange.Default"/>.
+    /// </value>
+    int SubtitleScale { get; set; }
+
     bool ShowRecent { get; set; }
     ThemeOption Theme { get; set; }
     bool EnqueueAllFilesInFolder { get; set; }
