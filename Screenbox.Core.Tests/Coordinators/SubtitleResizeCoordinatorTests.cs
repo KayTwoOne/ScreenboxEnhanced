@@ -1,4 +1,5 @@
 using System.Text;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.Extensions.Logging;
 using Screenbox.Core.Contexts;
 using Screenbox.Core.Coordinators;
@@ -41,9 +42,11 @@ public sealed class SubtitleResizeCoordinatorTests
     private static FakeTarget Target(SubtitleTrackInfo? selected = null, byte[]? file = null) =>
         new(file ?? SampleFile()) { SelectedTrack = selected ?? Dialogue };
 
+    // Each coordinator gets its own messenger, so a settings message sent by a test running at the
+    // same time cannot cancel the update this test is waiting for.
     private static SubtitleResizeCoordinator Coordinator(
-        TestSettingsService settings, FakeStore store, TimeSpan? delay = null, RecordingLogger? logger = null) =>
-        new(settings, store, new PlayerContext(), logger ?? new RecordingLogger(), delay ?? TimeSpan.Zero);
+        TestSettingsService settings, FakeStore store, TimeSpan? delay = null, RecordingLogger? logger = null, IMessenger? messenger = null) =>
+        new(settings, store, new PlayerContext(), logger ?? new RecordingLogger(), delay ?? TimeSpan.Zero, messenger ?? new WeakReferenceMessenger());
 
     private static SettingsChangedMessage ScaleChanged() => new(nameof(ISettingsService.SubtitleScale), typeof(SubtitleResizeCoordinatorTests));
 
@@ -103,6 +106,24 @@ public sealed class SubtitleResizeCoordinatorTests
         await Assert.That(store.Written[1]).Contains("Style: Main,Arial,120,");
         await Assert.That(target.ShownResized.Count).IsEqualTo(2);
         await Assert.That(target.ShownResized[1]).IsEqualTo(store.Mrls[1]);
+    }
+
+    [Test]
+    public async Task TheSettingsMessage_ReachesTheCoordinatorThroughTheMessenger()
+    {
+        TestSettingsService settings = new() { SubtitleScale = 150 };
+        FakeStore store = new();
+        FakeTarget target = Target();
+        WeakReferenceMessenger messenger = new();
+        SubtitleResizeCoordinator coordinator = Coordinator(settings, store, messenger: messenger);
+        coordinator.AttachTarget(target);
+        await coordinator.PendingUpdate;
+
+        settings.SubtitleScale = 200;
+        messenger.Send(ScaleChanged());
+        await coordinator.PendingUpdate;
+
+        await Assert.That(store.Written.Count).IsEqualTo(2);
     }
 
     [Test]

@@ -63,7 +63,8 @@ public sealed partial class SubtitleResizeCoordinator : ObservableRecipient, ISu
         IResizedSubtitleStore store,
         PlayerContext playerContext,
         ILogger<SubtitleResizeCoordinator> logger,
-        TimeSpan? scaleChangeDelay = null)
+        TimeSpan? scaleChangeDelay = null,
+        IMessenger? messenger = null) : base(messenger ?? WeakReferenceMessenger.Default)
     {
         _settingsService = settingsService;
         _store = store;
