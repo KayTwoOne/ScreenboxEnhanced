@@ -81,59 +81,6 @@
                 </StackPanel>
             </Flyout>
 
-            <Flyout x:Key="SubtitleOptionsFlyout">
-                <StackPanel
-                    Width="180"
-                    FlowDirection="LeftToRight"
-                    Orientation="Vertical"
-                    Spacing="8">
-                    <Slider
-                        x:Name="SubtitleTimingOffsetSlider"
-                        Header="{strings:Resources Key=TimingOffset}"
-                        IsThumbToolTipEnabled="False"
-                        Maximum="3000"
-                        Minimum="-3000"
-                        SmallChange="25"
-                        StepFrequency="50"
-                        Value="{Binding SubtitleTimingOffset, Mode=TwoWay}" />
-                    <TextBlock HorizontalAlignment="Center"><Run Text="{Binding ElementName=SubtitleTimingOffsetSlider, Path=Value, FallbackValue=0}" /> <Run Text="ms" /></TextBlock>
-                    <Slider
-                        x:Name="SubtitleSizeSlider"
-                        Header="{strings:Resources Key=SubtitleSizeSliderHeader}"
-                        IsThumbToolTipEnabled="False"
-                        Maximum="250"
-                        Minimum="50"
-                        SmallChange="10"
-                        StepFrequency="10"
-                        Value="{Binding SubtitleScale, Mode=TwoWay}" />
-                    <TextBlock HorizontalAlignment="Center"><Run Text="{Binding ElementName=SubtitleSizeSlider, Path=Value, FallbackValue=100}" /><Run Text="%" /></TextBlock>
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{strings:Resources Key=SubtitleSizeCaption}"
-                        TextWrapping="WrapWholeWords" />
-                </StackPanel>
-            </Flyout>
-
-            <Flyout x:Key="AudioOptionsFlyout">
-                <StackPanel
-                    Width="180"
-                    FlowDirection="LeftToRight"
-                    Orientation="Vertical"
-                    Spacing="8">
-                    <Slider
-                        x:Name="AudioTimingOffsetSlider"
-                        Header="{strings:Resources Key=TimingOffset}"
-                        IsThumbToolTipEnabled="False"
-                        Maximum="3000"
-                        Minimum="-3000"
-                        SmallChange="25"
-                        StepFrequency="50"
-                        Value="{Binding AudioTimingOffset, Mode=TwoWay}" />
-                    <TextBlock HorizontalAlignment="Center"><Run Text="{Binding ElementName=AudioTimingOffsetSlider, Path=Value, FallbackValue=0}" /> <Run Text="ms" /></TextBlock>
-                </StackPanel>
-            </Flyout>
-
             <MenuFlyout x:Key="NormalPlayerContextMenu">
                 <MenuFlyoutItem
                     AccessKey="{x:Bind strings:KeyboardResources.MenuItemFileKey}"
